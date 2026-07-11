@@ -67,6 +67,41 @@
     }
     .panel.flat { box-shadow: none; }
     .login-panel { align-content: start; }
+    .login-brand {
+      position: relative;
+      overflow: hidden;
+      min-height: 360px;
+      align-content: space-between;
+      background:
+        linear-gradient(135deg, rgba(23,115,102,.08), rgba(255,255,255,0) 38%),
+        linear-gradient(315deg, rgba(103,65,159,.08), rgba(255,255,255,0) 42%),
+        #fff;
+    }
+    .brand-stack { display: grid; gap: 10px; max-width: 420px; }
+    .brand-kicker { color: var(--accent); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+    .atelier-board {
+      display: grid;
+      grid-template-columns: 1.2fr .8fr 1fr;
+      gap: 10px;
+      align-items: end;
+      min-height: 150px;
+    }
+    .material-swatch {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 14px 34px rgba(32,37,34,.08);
+      min-height: 90px;
+      display: grid;
+      align-content: end;
+      padding: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .material-swatch.tall { min-height: 138px; background: #f5fbf8; border-color: rgba(23,115,102,.24); }
+    .material-swatch.mid { min-height: 112px; background: #f7f2fb; border-color: rgba(103,65,159,.22); }
+    .material-swatch.short { min-height: 82px; background: #fff9ec; border-color: rgba(184,117,18,.24); }
     h1, h2, h3 { margin: 0; letter-spacing: 0; }
     h1 { font-size: 30px; }
     h2 { font-size: 25px; }
@@ -280,9 +315,55 @@
     }
     .empty { padding: 28px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); text-align: center; background: rgba(255,255,255,.55); }
     .sync-warning { border-color: rgba(183,71,66,.35); background: #fff0ee; color: #7e2722; }
+    .welcome-panel {
+      overflow: hidden;
+      position: relative;
+      grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr);
+      align-items: stretch;
+    }
+    .welcome-copy { display: grid; gap: 10px; align-content: center; }
+    .welcome-copy h2 { font-size: 28px; }
+    .focus-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+    .focus-card {
+      border: 1px solid var(--line);
+      background: var(--soft);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+    .focus-card strong { font-size: 15px; }
+    .mood-board {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      min-height: 150px;
+    }
+    .mood-tile {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      min-height: 82px;
+      display: grid;
+      place-items: end start;
+      padding: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .mood-tile:nth-child(1) { background: #f6fbf9; border-color: rgba(23,115,102,.23); }
+    .mood-tile:nth-child(2) { background: #fff9ec; border-color: rgba(184,117,18,.24); }
+    .mood-tile:nth-child(3) { background: #f7f2fb; border-color: rgba(103,65,159,.22); }
+    .mood-tile:nth-child(4) { background: #f5f2ec; }
+    .mood-tile:nth-child(5) { background: #eef4fa; border-color: rgba(70,100,145,.2); }
+    .mood-tile:nth-child(6) { background: #fbf4f3; border-color: rgba(183,71,66,.2); }
 
     @media (max-width: 980px) {
       .login-card, .grid, .grid.three, .grid.four, .stat-grid, .card-grid, .table-row, .table-row.workshop-pay-row, .history-row, .access-row, .pay-summary { grid-template-columns: 1fr; }
+      .welcome-panel { grid-template-columns: 1fr; }
       .primary-layout { grid-template-columns: 1fr; }
       .photo-preview { max-width: 280px; }
       .primary-row { grid-template-columns: 1fr; }
@@ -299,6 +380,13 @@
       button, .file-button { width: 100%; min-height: 42px; }
       .login-screen { padding: 12px; place-items: start center; }
       .login-card, .quick-logins { grid-template-columns: 1fr; }
+      .login-brand { min-height: 300px; }
+      .atelier-board { min-height: 120px; }
+      .material-swatch.tall { min-height: 112px; }
+      .material-swatch.mid { min-height: 96px; }
+      .material-swatch.short { min-height: 72px; }
+      .welcome-copy h2 { font-size: 23px; }
+      .mood-board { grid-template-columns: repeat(2, 1fr); min-height: auto; }
       .panel, .section { padding: 14px; gap: 12px; }
       .workspace { padding: 12px; gap: 12px; }
       .session-bar {
@@ -416,17 +504,27 @@
 <body>
   <div class="login-screen" id="loginScreen">
     <div class="login-card">
+      <section class="panel login-panel login-brand">
+        <div class="brand-stack">
+          <span class="brand-kicker">Fashion development CRM</span>
+          <h1>CRM моделей одежды</h1>
+          <p class="muted">Тихое рабочее пространство для моделей, лекал, образцов, корректировок и градации.</p>
+        </div>
+        <div class="atelier-board" aria-hidden="true">
+          <div class="material-swatch tall">Лекала</div>
+          <div class="material-swatch short">Образцы</div>
+          <div class="material-swatch mid">Градация</div>
+        </div>
+      </section>
       <section class="panel login-panel">
-        <h1>CRM моделей одежды</h1>
-        <p class="muted">Локальная тестовая версия с ролями, Dashboard и полной карточкой модели.</p>
+        <h2>Вход</h2>
+        <p class="muted">Зайдите под своим доступом, чтобы увидеть только свои задачи и модели.</p>
         <div class="grid">
           <label><span>Логин / email</span><input id="loginInput" placeholder="admin или admin@fashion-crm.local"></label>
           <label><span>Пароль</span><input id="passwordInput" type="password" placeholder="admin"></label>
         </div>
         <button class="primary" id="loginButton">Войти</button>
         <span class="muted" id="loginError"></span>
-      </section>
-      <section class="panel login-panel">
         <h3>Тестовые входы</h3>
         <div class="quick-logins" id="quickLogins"></div>
       </section>
@@ -964,7 +1062,9 @@
       const user = currentUser();
       const visible = state.models.filter(m => hasAccess(m));
       const overdue = mine.filter(m => deadlineState(m.deadline).cls === "danger").length;
+      const soon = mine.filter(m => deadlineState(m.deadline).cls === "warn").length;
       return `
+        ${welcomePanel(user, mine, visible, overdue, soon)}
         <section class="panel">
           ${state.syncConflict ? `<div class="mini-block sync-warning"><span class="mini-title">Данные изменились в другой вкладке</span><p>Сохранение остановлено, чтобы не перезаписать чужие изменения. Нажмите “Загрузить новую версию” сверху.</p></div>` : ""}
           <div class="toolbar">
@@ -986,6 +1086,51 @@
           <div class="card-grid">${mine.map(modelCard).join("") || `<div class="empty">Сейчас на вас нет задач</div>`}</div>
         </section>
       `;
+    }
+
+    function welcomePanel(user, mine, visible, overdue, soon) {
+      const roleText = roleWelcome(user.role);
+      const firstAction = mine[0];
+      return `
+        <section class="panel welcome-panel">
+          <div class="welcome-copy">
+            <span class="brand-kicker">${escapeHtml(dayGreeting())}</span>
+            <h2>${escapeHtml(user.name)}, ${escapeHtml(roleText.title)}</h2>
+            <p class="muted">${escapeHtml(roleText.text)}</p>
+            <div class="focus-strip">
+              <span class="pill ok">${mine.length} задач на вас</span>
+              <span class="pill ${overdue ? "danger" : "ok"}">${overdue} срочно</span>
+              <span class="pill ${soon ? "warn" : "ok"}">${soon} скоро дедлайн</span>
+              <span class="pill">${visible.filter(m => unreadCount(m)).length} с новыми комментариями</span>
+            </div>
+            ${firstAction ? `<div class="focus-card"><strong>Начать можно с: ${escapeHtml(firstAction.title || "Без названия")}</strong><span class="muted">${escapeHtml(firstAction.status)} · дедлайн ${escapeHtml(firstAction.deadline || "не задан")}</span></div>` : `<div class="focus-card"><strong>Сейчас на вас нет зависших задач</strong><span class="muted">Можно спокойно посмотреть все модели или новые комментарии.</span></div>`}
+          </div>
+          <div class="mood-board" aria-hidden="true">
+            <div class="mood-tile">Идея</div>
+            <div class="mood-tile">Лекала</div>
+            <div class="mood-tile">Образец</div>
+            <div class="mood-tile">Правки</div>
+            <div class="mood-tile">Цех</div>
+            <div class="mood-tile">Финал</div>
+          </div>
+        </section>
+      `;
+    }
+
+    function dayGreeting() {
+      const hour = new Date().getHours();
+      if (hour < 6) return "Доброй ночи";
+      if (hour < 12) return "Доброе утро";
+      if (hour < 18) return "Добрый день";
+      return "Добрый вечер";
+    }
+
+    function roleWelcome(role) {
+      if (role === "Админ") return { title: "система под контролем", text: "Сверху видны доступы, резервные копии и состояние базы. Рабочие модели остаются на виду." };
+      if (role === "Владелец бренда/Дизайнер") return { title: "сегодня держим разработку в ритме", text: "Здесь собраны модели, где нужно принять решение, передать задачу или проверить результат." };
+      if (role === "Конструктор") return { title: "ваши лекала и корректировки собраны здесь", text: "CRM показывает только задачи, где сейчас ожидается ваша работа или финальная отметка." };
+      if (role === "Цех") return { title: "ваши образцы ждут аккуратного финиша", text: "На дашборде видны модели, которые сейчас находятся на отшиве или сдаче образца." };
+      return { title: "приятной работы", text: "Все нужные задачи и модели собраны на этом экране." };
     }
 
     function allView() {
