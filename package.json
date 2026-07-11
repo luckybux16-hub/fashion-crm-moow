@@ -1,0 +1,10 @@
+{
+  "name": "fashion-crm-moow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "mkdir -p dist && cp index.html dist/index.html",
+    "preview": "python3 -m http.server 4173"
+  }
+}

@@ -1,0 +1,1515 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CRM моделей одежды</title>
+  <style>
+    :root {
+      --bg: #f4f3ef;
+      --panel: #fff;
+      --soft: #faf9f6;
+      --text: #202522;
+      --muted: #6f7671;
+      --line: #ddd8cf;
+      --accent: #177366;
+      --ink: #1f2d2a;
+      --warn: #b87512;
+      --danger: #b74742;
+      --ok: #2d8550;
+      --shadow: 0 18px 45px rgba(32, 37, 34, .08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; }
+    button, input, textarea, select { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 7px;
+      min-height: 38px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #b7b0a6; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.dark { background: var(--ink); border-color: var(--ink); color: #fff; }
+    button.danger { color: var(--danger); border-color: rgba(183, 71, 66, .45); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .filters button { min-width: 104px; justify-content: center; }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 7px;
+      padding: 10px 11px;
+      min-height: 40px;
+      color: var(--text);
+    }
+    input[type="checkbox"] { width: 18px; min-height: 18px; }
+    textarea { resize: vertical; min-height: 78px; }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 14px; font-weight: 650; }
+    label.check { grid-template-columns: 20px 1fr; align-items: center; color: var(--text); }
+
+    .hidden { display: none !important; }
+    .login-screen { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+    .login-card { width: min(920px, 100%); display: grid; grid-template-columns: 1fr 1.15fr; gap: 18px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 14px;
+    }
+    .panel.flat { box-shadow: none; }
+    .login-panel { align-content: start; }
+    h1, h2, h3 { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 25px; }
+    h3 { font-size: 16px; }
+    p { margin: 0; line-height: 1.45; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .quick-logins { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .quick-login { text-align: left; min-height: 76px; display: grid; gap: 4px; align-content: center; }
+
+    .app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+    .session-bar {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    .main-nav, .row, .toolbar, .statusline, .tabs, .actions, .filters { display: flex; align-items: center; gap: 8px; }
+    .main-nav { flex-wrap: wrap; }
+    .nav-btn.active, .tab.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+    .workspace { width: min(1280px, 100%); margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
+    .toolbar { justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .primary-row { display: grid; grid-template-columns: 1fr 118px 2fr 1fr; gap: 12px; align-items: end; }
+    .span-2 { grid-column: span 2; }
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+
+    .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .stat { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-height: 82px; }
+    .stat strong { display: block; font-size: 26px; line-height: 1.1; margin-bottom: 6px; }
+    .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .model-card {
+      text-align: left;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 150px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .model-card:hover { box-shadow: var(--shadow); border-color: #b9b2a7; }
+    .model-card.deadline-warn { background: #fff9eb; border-color: rgba(184, 117, 18, .38); }
+    .model-card.deadline-danger { background: #fff0ee; border-color: rgba(183, 71, 66, .35); }
+    .model-card strong { font-size: 16px; overflow-wrap: anywhere; }
+    .model-photo {
+      width: 100%;
+      aspect-ratio: 2 / 3;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      cursor: zoom-in;
+    }
+    .model-photo-placeholder {
+      width: 100%;
+      aspect-ratio: 2 / 3;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      border: 1px dashed var(--line);
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      width: fit-content;
+      min-height: 26px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .pill.danger { color: var(--danger); border-color: rgba(183,71,66,.35); }
+    .pill.ok { color: var(--ok); border-color: rgba(45,133,80,.35); }
+    .pill.warn { color: var(--warn); border-color: rgba(184,117,18,.35); }
+    .status-badge {
+      color: #17201d;
+      border-width: 1px;
+      border-style: solid;
+      font-weight: 800;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.45);
+    }
+    .status-draft { background: #f1ece3; border-color: #cfc6b8; }
+    .status-pattern { background: #dcefeb; border-color: #9dcac1; }
+    .status-sample { background: #e7edf8; border-color: #aabde0; }
+    .status-correction { background: #f4e7f1; border-color: #d5aecb; }
+    .status-grading { background: #eee8fb; border-color: #bcaedf; }
+    .status-ready { background: #e2f1e7; border-color: #9fcaad; }
+    .status-finished { background: #dfece4; border-color: #8fb89d; }
+    .status-deleted { background: #f7e2df; border-color: #d89993; color: #7e2722; }
+    .status-main {
+      min-height: 34px;
+      padding: 7px 12px;
+      font-size: 13px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 99px; background: var(--muted); flex: 0 0 auto; }
+    .dot.ok { background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+    .dot.danger { background: var(--danger); }
+
+    .detail-head {
+      display: grid;
+      gap: 12px;
+      background: rgba(244, 243, 239, .95);
+      border-bottom: 1px solid var(--line);
+      padding: 16px 20px;
+      position: sticky;
+      top: 58px;
+      z-index: 4;
+      backdrop-filter: blur(12px);
+    }
+    .section { display: grid; gap: 14px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: var(--shadow); }
+    .subsection { display: grid; gap: 12px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+    .primary-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: stretch; }
+    .primary-fields { display: grid; gap: 12px; }
+    .primary-photo-block { display: grid; gap: 10px; align-content: start; }
+    .photo-preview {
+      width: 100%;
+      aspect-ratio: 2 / 3;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      cursor: zoom-in;
+    }
+    .file-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: fit-content;
+      min-height: 40px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .file-button input { display: none; }
+    .mini-block { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); padding: 12px; }
+    .mini-title { color: var(--muted); font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+    .date-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .date-item { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 8px 10px; min-height: 58px; }
+    .date-item span { display: block; color: var(--muted); font-size: 12px; font-weight: 750; margin-bottom: 4px; }
+    .date-item strong { display: block; font-size: 14px; line-height: 1.15; overflow-wrap: anywhere; }
+    .text-block { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; display: grid; gap: 6px; }
+    .text-block.owner-note { background: #f6fbf9; border-color: rgba(23, 115, 102, .28); }
+    .text-block.workshop-note { background: #f7f5ff; border-color: rgba(117, 94, 166, .28); }
+    .text-block.correction-note { background: #fff7fb; border-color: rgba(180, 88, 145, .28); }
+    .text-block.link-note { background: #fff7fb; border-color: rgba(180, 88, 145, .28); }
+    .text-block span { color: var(--muted); font-size: 13px; font-weight: 750; }
+    .text-block p { font-size: 15px; overflow-wrap: anywhere; }
+    .check-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pay-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 1.2fr; gap: 12px; }
+    .pay-summary .stat.total { background: #f3edff; border-color: #cdbbeb; }
+    .pay-summary .stat.total strong { color: #67419f; }
+    .chat { display: grid; gap: 10px; max-width: 850px; }
+    .comment { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; display: grid; gap: 8px; }
+    .comment-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .table-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr auto; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
+    .table-row.workshop-pay-row { grid-template-columns: 1.1fr .8fr .8fr 1.2fr 1fr auto; }
+    .history-row { display: grid; grid-template-columns: 150px 1fr 160px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
+    .access-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(23, 31, 28, .45); display: grid; place-items: center; padding: 20px; }
+    .modal { width: min(620px, 100%); background: #fff; border-radius: 8px; border: 1px solid var(--line); box-shadow: 0 26px 80px rgba(0,0,0,.22); padding: 18px; display: grid; gap: 14px; }
+    .photo-modal {
+      position: relative;
+      width: min(94vw, 980px);
+      height: min(94vh, 980px);
+      display: grid;
+      place-items: center;
+    }
+    .photo-modal img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 8px;
+      box-shadow: 0 26px 80px rgba(0,0,0,.32);
+      background: #fff;
+    }
+    .photo-modal button {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      min-width: 42px;
+      min-height: 42px;
+      border-color: rgba(255,255,255,.45);
+      background: rgba(255,255,255,.92);
+    }
+    .empty { padding: 28px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); text-align: center; background: rgba(255,255,255,.55); }
+
+    @media (max-width: 980px) {
+      .login-card, .grid, .grid.three, .grid.four, .stat-grid, .card-grid, .table-row, .table-row.workshop-pay-row, .history-row, .access-row, .pay-summary { grid-template-columns: 1fr; }
+      .primary-layout { grid-template-columns: 1fr; }
+      .photo-preview { max-width: 280px; }
+      .primary-row { grid-template-columns: 1fr; }
+      .date-row { grid-template-columns: 1fr; }
+      .span-2, .span-3, .span-4 { grid-column: auto; }
+      .session-bar, .toolbar { align-items: stretch; flex-direction: column; }
+      .detail-head { top: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <section class="panel login-panel">
+        <h1>CRM моделей одежды</h1>
+        <p class="muted">Локальная тестовая версия с ролями, Dashboard и полной карточкой модели.</p>
+        <div class="grid">
+          <label><span>Логин</span><input id="loginInput" placeholder="admin"></label>
+          <label><span>Пароль</span><input id="passwordInput" type="password" placeholder="admin"></label>
+        </div>
+        <button class="primary" id="loginButton">Войти</button>
+        <span class="muted" id="loginError"></span>
+      </section>
+      <section class="panel login-panel">
+        <h3>Тестовые входы</h3>
+        <div class="quick-logins" id="quickLogins"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="app-shell hidden" id="appShell">
+    <div class="session-bar">
+      <div class="row">
+        <span class="pill" id="sessionName"></span>
+        <span class="pill" id="sessionRole"></span>
+      </div>
+      <div class="main-nav" id="mainNav"></div>
+      <button id="logoutButton">Выйти</button>
+    </div>
+    <main id="app"></main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="modalRoot"></div>
+
+  <script>
+    const storeKey = "fashion-crm-local-v3";
+    const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
+    const users = [
+      { id: "u-admin", name: "Админ", login: "admin", password: "admin", role: "Админ", active: true },
+      { id: "u-owner", name: "Владелец / дизайнер", login: "owner", password: "owner", role: "Владелец бренда/Дизайнер", active: true },
+      { id: "u-workshop", name: "Цех", login: "workshop", password: "workshop", role: "Цех", active: true },
+      { id: "u-constructor", name: "Конструктор", login: "constructor", password: "constructor", role: "Конструктор", active: true }
+    ];
+    const baseTabs = ["Основная", "Комментарии", "Оплата конструктора", "Оплата и расход цеха", "История", "Статистика"];
+    const statusList = [
+      "Черновик", "Новая модель", "Разработка лекал", "Лекала в работе", "Лекала готовы",
+      "Передано на градацию", "Градация в работе", "Градация готова", "Завершено", "Удалено из разработки"
+    ];
+    const today = () => new Date().toISOString().slice(0, 10);
+    const addDays = days => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+    const nowText = () => new Date().toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+    const uid = () => Math.random().toString(36).slice(2, 10);
+
+    const seed = {
+      currentUserId: "",
+      view: "dashboard",
+      allFilter: "process",
+      allResponsibleFilter: "",
+      statsPeriod: "month",
+      activeModelId: "",
+      activeTab: "Основная",
+      users,
+      models: [
+        makeModel({ id: "m-draft", title: "Платье-комбинация", article: "DR-014", status: "Черновик", responsible: "u-owner", deadline: addDays(3), samples: [], corrections: [], unread: { "u-owner": 1 } }),
+        makeModel({ id: "m-pattern", title: "Жакет прямого силуэта", article: "JK-001", status: "Лекала в работе", responsible: "u-constructor", deadline: addDays(4), pattern: { sentAt: today(), acceptedAt: today(), deadline: addDays(4), checklist: blankChecklist(), readyAt: "", cost: 0 }, participants: ["u-owner", "u-constructor"] }),
+        makeModel({ id: "m-sample", title: "Юбка миди", article: "SK-022", status: "Образец 1 в работе", responsible: "u-workshop", deadline: addDays(2), samples: [sample(1, { status: "Образец 1 в работе", sentAt: today(), acceptedAt: today(), deadline: addDays(2), ownerComment: "Проверить посадку по талии." })], participants: ["u-owner", "u-constructor", "u-workshop"] }),
+        makeModel({ id: "m-owner", title: "Брюки палаццо", article: "TR-008", status: "Образец 1 готов", responsible: "u-owner", deadline: addDays(1), samples: [sample(1, { status: "Образец 1 готов", sentAt: today(), acceptedAt: today(), deadline: today(), readyAt: today(), workshopComment: "Образец готов, посадка свободная.", fabricUsage: 2.1, cost: 1700 })], participants: ["u-owner", "u-constructor", "u-workshop"] }),
+        makeModel({ id: "m-grade", title: "Рубашка oversize", article: "SH-031", status: "Градация готова", responsible: "u-owner", deadline: today(), grading: { finalName: "Рубашка oversize SH-031", sizes: "XS-XL", comment: "Градация по базовой сетке.", extraComment: "Проверить длину рукава.", sentAt: today(), acceptedAt: today(), deadline: today(), readyAt: today(), checklist: { notches: true, printDetails: true, nameUpdated: true, sentTelegram: true }, cost: 4200 }, participants: ["u-owner", "u-constructor"] })
+      ]
+    };
+
+    function makeModel(overrides = {}) {
+      const model = {
+        id: uid(),
+        brand: "Не определились",
+        photoDataUrl: "",
+        title: "Новая модель",
+        article: "",
+        sizeRange: "XS-L",
+        material: "",
+        hardware: "",
+        description: "",
+        important: "",
+        gradingComment: "",
+        links: [""],
+        status: "Черновик",
+        currentResponsibleUserId: "u-owner",
+        deadline: "",
+        createdByUserId: "u-owner",
+        ownerUserId: "u-owner",
+        constructorUserId: "u-constructor",
+        workshopUserId: "u-workshop",
+        participants: ["u-owner"],
+        createdAt: today(),
+        updatedAt: today(),
+        deletedReason: "",
+        unread: {},
+        pattern: { sentAt: "", acceptedAt: "", deadline: "", readyAt: "", checklist: blankChecklist(), cost: 0 },
+        samples: [],
+        corrections: [],
+        grading: { finalName: "", sizes: "", comment: "", extraComment: "", sentAt: "", acceptedAt: "", deadline: "", readyAt: "", checklist: { notches: false, printDetails: false, nameUpdated: false, sentTelegram: false }, cost: 0 },
+        payments: {
+          constructor: [
+            { id: uid(), work: "Разработка лекал", amount: 0, paid: false, paidAt: "" },
+            { id: uid(), work: "Градация", amount: 0, paid: false, paidAt: "" }
+          ]
+        },
+        comments: [],
+        history: [{ date: nowText(), user: "Система", action: "Создана карточка модели" }]
+      };
+      return { ...model, ...overrides };
+    }
+
+    function blankChecklist() {
+      return { notches: false, printDetails: false, signed: false };
+    }
+
+    function sample(number, overrides = {}) {
+      return {
+        id: uid(), number, status: `Отшив образца ${number}`, sentAt: "", acceptedAt: "",
+        deadline: "", readyAt: "", ownerComment: "", workshopComment: "", usedHardware: "",
+        fabricUsage: 0, cost: 0, paid: false, paidAt: "", ...overrides
+      };
+    }
+
+    function correction(number, overrides = {}) {
+      return {
+        id: uid(), number, status: `Поданы корректировки ${number}`, text: "", link: "",
+        sentAt: today(), acceptedAt: "", deadline: "", readyAt: "",
+        checklist: blankChecklist(), printCost: 0, ...overrides
+      };
+    }
+
+    let state = load();
+
+    function load() {
+      let data;
+      try { data = JSON.parse(localStorage.getItem(storeKey)) || structuredClone(seed); }
+      catch { data = structuredClone(seed); }
+      data.statsPeriod = data.statsPeriod || "month";
+      data.allResponsibleFilter = data.allResponsibleFilter || "";
+      (data.models || []).forEach(model => {
+        model.brand = model.brand || "Не определились";
+        model.photoDataUrl = model.photoDataUrl || "";
+        (model.samples || []).forEach(s => s.usedHardware = s.usedHardware || "");
+        (model.corrections || []).forEach(c => c.printCost = Number(c.printCost || 0));
+      });
+      cleanupTechnicalHistory(data);
+      return data;
+    }
+
+    function cleanupTechnicalHistory(data) {
+      (data.models || []).forEach(model => {
+        model.history = (model.history || []).filter(item => !isTechnicalHistory(item));
+      });
+    }
+
+    function isTechnicalHistory(item) {
+      const action = item?.action || "";
+      return action.includes('"newComment"') || action.includes('"newUser') || action.includes('"link:');
+    }
+
+    function persist() { localStorage.setItem(storeKey, JSON.stringify(state)); }
+    persist();
+    function currentUser() { return state.users.find(u => u.id === state.currentUserId) || null; }
+    function currentModel() { return state.models.find(m => m.id === state.activeModelId) || null; }
+    function userName(id) { return state.users.find(u => u.id === id)?.name || "Не назначен"; }
+    function roleOf(id) { return state.users.find(u => u.id === id)?.role || ""; }
+    function isAdmin() { return currentUser()?.role === "Админ"; }
+    function isOwner() { return currentUser()?.role === "Владелец бренда/Дизайнер"; }
+    function canEditPrimary() { return isAdmin() || isOwner(); }
+    function canPay() { return isAdmin() || isOwner(); }
+    function canViewGlobalStats() { return isAdmin() || isOwner(); }
+    function money(v) { return Number(v || 0).toLocaleString("ru-RU") + " грн"; }
+    function inProcess(m) { return !["Завершено", "Удалено из разработки"].includes(m.status); }
+    function isDeleted(m) { return m.status === "Удалено из разработки"; }
+    function hasAccess(m, user = currentUser()) {
+      if (!user) return false;
+      if (user.role === "Админ" || user.role === "Владелец бренда/Дизайнер") return true;
+      if (isDeleted(m)) return false;
+      return m.participants.includes(user.id);
+    }
+    function dashboardModels() {
+      const user = currentUser();
+      if (!user) return [];
+      return state.models.filter(m => hasAccess(m, user) && inProcess(m) && m.currentResponsibleUserId === user.id);
+    }
+    function allModels() {
+      return state.models.filter(m => {
+        if (!hasAccess(m)) return false;
+        if (state.allResponsibleFilter && m.currentResponsibleUserId !== state.allResponsibleFilter) return false;
+        if (state.allFilter === "process") return inProcess(m);
+        return true;
+      });
+    }
+    function allowedTabs() {
+      const role = currentUser()?.role;
+      if (role === "Конструктор") return ["Основная", "Комментарии", "Оплата конструктора"];
+      if (role === "Цех") return ["Основная", "Комментарии", "Оплата и расход цеха"];
+      return baseTabs;
+    }
+    function addHistory(model, action) {
+      model.history.unshift({ date: nowText(), user: currentUser()?.name || "Система", action });
+      model.updatedAt = today();
+    }
+    function addParticipant(model, userId) {
+      if (userId && !model.participants.includes(userId)) model.participants.push(userId);
+    }
+    function replaceParticipantByRole(model, userId, role) {
+      model.participants = model.participants.filter(id => roleOf(id) !== role);
+      addParticipant(model, userId);
+    }
+    function unreadCount(model) {
+      return Number(model.unread?.[currentUser()?.id] || 0);
+    }
+    function deadlineState(date) {
+      if (!date) return { label: "без дедлайна", cls: "" };
+      const diff = Math.ceil((new Date(date) - new Date(today())) / 86400000);
+      if (diff < 0) return { label: "просрочено", cls: "danger" };
+      if (diff <= 1) return { label: "1 день", cls: "danger" };
+      if (diff === 2) return { label: "2 дня", cls: "warn" };
+      return { label: "в срок", cls: "ok" };
+    }
+
+    function correctionPrintTotal(model) {
+      return (model.corrections || []).reduce((sum, c) => sum + Number(c.printCost || 0), 0);
+    }
+
+    function statusClass(status) {
+      const text = String(status || "").toLowerCase();
+      if (text === "удалено из разработки") return "status-deleted";
+      if (text === "завершено") return "status-finished";
+      if (text === "черновик" || text === "новая модель") return "status-draft";
+      if (text.includes("лекал")) return text.includes("готов") ? "status-ready" : "status-pattern";
+      if (text.includes("образца") || text.includes("образец")) return text.includes("готов") ? "status-ready" : "status-sample";
+      if (text.includes("корректиров")) return text.includes("готов") ? "status-ready" : "status-correction";
+      if (text.includes("градац")) return text.includes("готов") ? "status-ready" : "status-grading";
+      return "status-draft";
+    }
+
+    function statusBadge(status, extra = "") {
+      return `<span class="pill status-badge ${statusClass(status)} ${extra}">${escapeHtml(status || "-")}</span>`;
+    }
+
+    function render() {
+      renderShell();
+      renderLogin();
+      if (!currentUser()) return;
+      if (state.view === "detail" && currentModel()) renderDetail();
+      else renderHome();
+    }
+
+    function renderShell() {
+      const user = currentUser();
+      document.getElementById("loginScreen").classList.toggle("hidden", !!user);
+      document.getElementById("appShell").classList.toggle("hidden", !user);
+      if (!user) return;
+      if (state.view === "stats" && !canViewGlobalStats()) state.view = "dashboard";
+      if (state.view === "access" && !isAdmin()) state.view = "dashboard";
+      document.getElementById("sessionName").textContent = user.name;
+      document.getElementById("sessionRole").textContent = user.role;
+      document.getElementById("mainNav").innerHTML = `
+        <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
+        <button class="nav-btn ${state.view === "all" ? "active" : ""}" data-view="all">Все модели</button>
+        ${canViewGlobalStats() ? `<button class="nav-btn ${state.view === "stats" ? "active" : ""}" data-view="stats">Статистика</button>` : ""}
+        ${isAdmin() ? `<button class="nav-btn ${state.view === "access" ? "active" : ""}" data-view="access">Доступы</button>` : ""}
+      `;
+      document.querySelectorAll("[data-view]").forEach(btn => btn.onclick = () => {
+        state.view = btn.dataset.view;
+        state.activeModelId = "";
+        persist();
+        render();
+      });
+    }
+
+    function renderLogin() {
+      document.getElementById("quickLogins").innerHTML = state.users.filter(u => u.active).map(u => `
+        <button class="quick-login" data-login="${u.id}">
+          <strong>${escapeHtml(u.role)}</strong>
+          <span class="muted">${escapeHtml(u.login)} / ${escapeHtml(u.password)}</span>
+        </button>
+      `).join("");
+      document.querySelectorAll("[data-login]").forEach(btn => btn.onclick = () => loginAs(btn.dataset.login));
+    }
+
+    function renderHome() {
+      const app = document.getElementById("app");
+      app.innerHTML = `<div class="workspace">${state.view === "access" ? accessView() : state.view === "stats" ? globalStatsView() : state.view === "all" ? allView() : dashboardView()}</div>`;
+      bindHome();
+    }
+
+    function dashboardView() {
+      const mine = dashboardModels();
+      const user = currentUser();
+      const visible = state.models.filter(m => hasAccess(m));
+      const overdue = mine.filter(m => deadlineState(m.deadline).cls === "danger").length;
+      return `
+        <section class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>Dashboard</h2>
+              <p class="muted">Сверху краткая сводка, ниже модели, где сейчас ожидается ваше действие.</p>
+            </div>
+            ${(isOwner() || isAdmin()) ? `<button class="primary" id="newModel">Создать модель</button>` : ""}
+          </div>
+          <div class="stat-grid">
+            ${stat(mine.length, "на мне сейчас")}
+            ${stat(visible.filter(inProcess).length, "в процессе")}
+            ${stat(overdue, "просрочено")}
+            ${stat(visible.filter(m => unreadCount(m)).length, "с новыми комментариями")}
+          </div>
+        </section>
+        <section class="panel">
+          <h3>Модели на мне</h3>
+          <div class="card-grid">${mine.map(modelCard).join("") || `<div class="empty">Сейчас на вас нет задач</div>`}</div>
+        </section>
+      `;
+    }
+
+    function allView() {
+      return `
+        <section class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>Все модели</h2>
+              <p class="muted">Короткие карточки моделей. Детали открываются по клику.</p>
+            </div>
+            <div class="filters">
+              <button class="${state.allFilter === "process" ? "dark" : ""}" data-filter="process">В процессе</button>
+              <button class="${state.allFilter === "all" ? "dark" : ""}" data-filter="all">Все</button>
+              <select id="responsibleFilter">
+                <option value="">Все ответственные</option>
+                ${state.users.filter(u => u.active).map(u => `<option value="${u.id}" ${state.allResponsibleFilter === u.id ? "selected" : ""}>${escapeHtml(u.name)}</option>`).join("")}
+              </select>
+            </div>
+          </div>
+          <div class="card-grid">${allModels().map(modelCard).join("") || `<div class="empty">Модели не найдены</div>`}</div>
+        </section>
+      `;
+    }
+
+    function globalStatsView() {
+      if (!canViewGlobalStats()) return `<section class="panel"><div class="empty">Нет доступа</div></section>`;
+      const models = modelsForStatsPeriod();
+      const inWork = models.filter(inProcess);
+      const done = models.filter(m => m.status === "Завершено");
+      const constructorTotal = models.reduce((sum, m) => sum + m.payments.constructor.reduce((s, p) => s + Number(p.amount || 0), 0), 0);
+      const workshopTotal = models.reduce((sum, m) => sum + m.samples.filter(s => s.readyAt).reduce((s, sample) => s + Number(sample.cost || 0), 0), 0);
+      const totalSpent = constructorTotal + workshopTotal;
+      return `
+        <section class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>Статистика</h2>
+              <p class="muted">Общая статистика видна только владельцу/дизайнеру и админу.</p>
+            </div>
+            <div class="filters">
+              <button class="${state.statsPeriod === "week" ? "dark" : ""}" data-stats-period="week">Неделя</button>
+              <button class="${state.statsPeriod === "month" ? "dark" : ""}" data-stats-period="month">Месяц</button>
+              <button class="${state.statsPeriod === "all" ? "dark" : ""}" data-stats-period="all">Все</button>
+            </div>
+          </div>
+          <div class="stat-grid">
+            ${stat(inWork.length, "моделей в разработке")}
+            ${stat(done.length, "готовых моделей")}
+            ${stat(money(totalSpent), "потрачено всего")}
+            ${stat(models.length, "моделей в периоде")}
+          </div>
+        </section>
+        <section class="panel">
+          <h3>Модели за период</h3>
+          <div class="card-grid">${models.map(modelCard).join("") || `<div class="empty">За выбранный период моделей нет</div>`}</div>
+        </section>
+      `;
+    }
+
+    function modelsForStatsPeriod() {
+      if (state.statsPeriod === "all") return state.models.filter(m => !isDeleted(m));
+      const days = state.statsPeriod === "week" ? 7 : 30;
+      const from = new Date();
+      from.setDate(from.getDate() - days);
+      return state.models.filter(m => !isDeleted(m) && new Date(m.createdAt) >= from);
+    }
+
+    function accessView() {
+      if (!isAdmin()) return `<section class="panel"><div class="empty">Нет доступа</div></section>`;
+      return `
+        <section class="panel">
+          <div>
+            <h2>Доступы</h2>
+            <p class="muted">Создание пользователей, смена ролей и отключение доступов.</p>
+          </div>
+        </section>
+        ${accessTab()}
+      `;
+    }
+
+    function modelCard(m) {
+      const d = deadlineState(m.deadline);
+      const unread = unreadCount(m);
+      return `
+        <button class="model-card ${d.cls ? "deadline-" + d.cls : ""}" data-open="${m.id}">
+          ${modelPhotoThumb(m)}
+          <strong>${escapeHtml(m.title || "Без названия")}</strong>
+          <div class="row">
+            <span class="pill">${escapeHtml(m.article || "без артикула")}</span>
+            ${unread ? `<span class="pill warn">${unread} новых</span>` : ""}
+          </div>
+          ${statusBadge(m.status)}
+          <span class="muted">Ответственный: ${escapeHtml(userName(m.currentResponsibleUserId))}</span>
+          <span class="pill"><span class="dot ${d.cls}"></span>${d.label}: ${m.deadline || "-"}</span>
+        </button>
+      `;
+    }
+
+    function bindHome() {
+      bindPhotoOpeners();
+      document.querySelectorAll("[data-open]").forEach(btn => btn.onclick = () => {
+        state.activeModelId = btn.dataset.open;
+        state.view = "detail";
+        state.activeTab = "Основная";
+        persist();
+        render();
+      });
+      document.querySelectorAll("[data-filter]").forEach(btn => btn.onclick = () => {
+        state.allFilter = btn.dataset.filter;
+        persist();
+        render();
+      });
+      const responsibleFilter = document.getElementById("responsibleFilter");
+      if (responsibleFilter) responsibleFilter.onchange = () => {
+        state.allResponsibleFilter = responsibleFilter.value;
+        persist();
+        render();
+      };
+      document.querySelectorAll("[data-stats-period]").forEach(btn => btn.onclick = () => {
+        state.statsPeriod = btn.dataset.statsPeriod;
+        persist();
+        render();
+      });
+      const newBtn = document.getElementById("newModel");
+      if (newBtn) newBtn.onclick = createModel;
+      bindAccess();
+    }
+
+    function renderDetail() {
+      const m = currentModel();
+      const tabs = allowedTabs();
+      if (!tabs.includes(state.activeTab)) state.activeTab = tabs[0];
+      if (state.activeTab === "Комментарии") {
+        m.unread[currentUser().id] = 0;
+        persist();
+      }
+      const app = document.getElementById("app");
+      app.innerHTML = `
+        <div class="detail-head">
+          <div class="toolbar">
+            <div>
+              <button id="backHome">← На главную</button>
+              <h2>${escapeHtml(m.title || "Без названия")}</h2>
+              <p class="muted">${escapeHtml(m.article || "без артикула")}</p>
+            </div>
+            <div class="actions">${actionButtons(m)}</div>
+          </div>
+          <div class="statusline">
+            ${statusBadge(m.status, "status-main")}
+            <span class="pill">Ответственный: ${escapeHtml(userName(m.currentResponsibleUserId))}</span>
+            <span class="pill">Дедлайн: ${m.deadline || "-"}</span>
+            <span class="pill">Создано: ${m.createdAt}</span>
+          </div>
+          <div class="tabs">${tabs.map(t => `<button class="tab ${state.activeTab === t ? "active" : ""}" data-tab="${t}">${tabTitle(t, m)}</button>`).join("")}</div>
+        </div>
+        <div class="workspace">${detailTab(m)}</div>
+      `;
+      bindDetail();
+    }
+
+    function detailTab(m) {
+      if (state.activeTab === "Основная") return mainTab(m);
+      if (state.activeTab === "Комментарии") return commentsTab(m);
+      if (state.activeTab === "Оплата конструктора") return constructorPayTab(m);
+      if (state.activeTab === "Оплата и расход цеха") return workshopPayTab(m);
+      if (state.activeTab === "История") return historyTab(m);
+      if (state.activeTab === "Статистика") return statsTab(m);
+      return "";
+    }
+
+    function tabTitle(tab, model) {
+      if (tab !== "Комментарии") return escapeHtml(tab);
+      const count = unreadCount(model);
+      return `Комментарии${count ? ` <span class="pill warn">${count}</span>` : ""}`;
+    }
+
+    function mainTab(m) {
+      return `
+        <section class="section">
+          <div class="toolbar">
+            <h3>Исполнители</h3>
+            <span class="muted">${canEditPrimary() ? "Выбираются владельцем или админом" : "Только просмотр"}</span>
+          </div>
+          <div class="grid">
+            ${selectUserField("constructorUserId", "Конструктор", "Конструктор", m.constructorUserId)}
+            ${selectUserField("workshopUserId", "Цех", "Цех", m.workshopUserId)}
+          </div>
+        </section>
+        <section class="section">
+          <div class="toolbar">
+            <h3>Первичные данные</h3>
+            <span class="muted">${canEditPrimary() ? "Можно редактировать" : "Только просмотр"}</span>
+          </div>
+          <div class="primary-layout">
+            ${modelPhotoSection(m)}
+            <div class="primary-fields">
+              <div class="primary-row">
+                ${selectField("brand", "Бренд", m.brand, ["MOOW", "LEXIE", "Не определились"])}
+                ${field("article", "Артикул", m.article)}
+                ${field("title", "Название модели", m.title)}
+                ${field("sizeRange", "Размерный ряд", m.sizeRange)}
+              </div>
+              <div class="grid">
+                ${field("material", "Материал", m.material)}
+                ${field("hardware", "Фурнитура", m.hardware)}
+              </div>
+              ${area("description", "Описание", m.description)}
+              ${area("important", "Детали", m.important)}
+              ${area("gradingComment", "Первый комментарий по градации", m.gradingComment)}
+            </div>
+          </div>
+          <div class="subsection">
+            <div class="toolbar"><h3>Ссылки на фото/видео</h3>${canEditPrimary() ? `<button id="addLink">+ Добавить ссылку</button>` : ""}</div>
+            <div class="grid">${m.links.map((link, i) => field(`link:${i}`, `Ссылка ${i + 1}`, link)).join("")}</div>
+          </div>
+        </section>
+        ${m.pattern.sentAt ? patternBlock(m) : ""}
+        ${timelineBlocks(m)}
+        ${m.grading.sentAt ? gradingBlock(m) : ""}
+        ${isAdmin() ? adminBlock(m) : ""}
+      `;
+    }
+
+    function timelineBlocks(m) {
+      const max = Math.max(m.samples.length, m.corrections.length);
+      const blocks = [];
+      for (let i = 1; i <= max; i += 1) {
+        const sampleItem = m.samples.find(s => s.number === i);
+        const correctionItem = m.corrections.find(c => c.number === i);
+        if (sampleItem) blocks.push(sampleBlock(sampleItem));
+        if (correctionItem) blocks.push(correctionBlock(correctionItem));
+      }
+      return blocks.join("");
+    }
+
+    function patternBlock(m) {
+      return `
+        <section class="section">
+          <h3>Разработка лекал</h3>
+          ${datesMiniBlock([
+            ["Передано конструктору", m.pattern.sentAt],
+            ["Взято в работу", m.pattern.acceptedAt],
+            ["Дедлайн", m.pattern.deadline],
+            ["Фактическая дата сдачи", m.pattern.readyAt]
+          ])}
+          ${statusMiniBlock(m.status)}
+          ${checksMiniBlock([
+            ["Проставлены все надсечки", m.pattern.checklist.notches],
+            ["Все детали есть в печати", m.pattern.checklist.printDetails],
+            [`На лекалах подписан артикул и название (${m.title} ${m.article})`, m.pattern.checklist.signed]
+          ])}
+        </section>
+      `;
+    }
+
+    function sampleBlock(s) {
+      return `
+        <section class="section">
+          <h3>Образец ${s.number}</h3>
+          ${datesMiniBlock([
+            ["Передано в цех", s.sentAt],
+            ["Взято в работу", s.acceptedAt],
+            ["Дедлайн", s.deadline],
+            ["Фактическая дата сдачи", s.readyAt]
+          ])}
+          ${statusMiniBlock(s.status)}
+          ${textMiniBlock(`Комментарий для цеха к образцу ${s.number}`, s.ownerComment, "owner-note")}
+          ${s.readyAt ? textMiniBlock(`Комментарий цеха после отшива ${s.number} образца`, s.workshopComment, "workshop-note") : ""}
+          ${s.readyAt ? textMiniBlock("Использованная фурнитура", s.usedHardware, "workshop-note") : ""}
+        </section>
+      `;
+    }
+
+    function correctionBlock(c) {
+      return `
+        <section class="section">
+          <h3>Корректировки ${c.number}</h3>
+          ${datesMiniBlock([
+            ["Поданы", c.sentAt],
+            ["Взято в работу", c.acceptedAt],
+            ["Дедлайн", c.deadline],
+            ["Фактическая дата сдачи", c.readyAt]
+          ])}
+          ${statusMiniBlock(c.status)}
+          ${textMiniBlock(`Корректировки ${c.number}`, c.text, "correction-note")}
+          ${textMiniBlock("Ссылка на фото/видео корректировок", c.link, "link-note")}
+          ${checksMiniBlock([
+            ["Проставлены все надсечки", c.checklist.notches],
+            ["Все детали есть в печати", c.checklist.printDetails],
+            ["На лекалах подписан артикул и название модели", c.checklist.signed]
+          ])}
+        </section>
+      `;
+    }
+
+    function gradingBlock(m) {
+      const g = m.grading;
+      return `
+        <section class="section">
+          <h3>Градация</h3>
+          ${datesMiniBlock([
+            ["Передано на градацию", g.sentAt],
+            ["Взято в работу", g.acceptedAt],
+            ["Дедлайн", g.deadline],
+            ["Фактическая дата сдачи", g.readyAt]
+          ])}
+          ${statusMiniBlock(m.status)}
+          <div class="mini-block">
+            <span class="mini-title">Данные градации</span>
+            <div class="date-row">
+              ${dateItem("Финальное название", g.finalName)}
+              ${dateItem("Актуальные размеры", g.sizes)}
+            </div>
+          </div>
+          ${textMiniBlock("Обновленный комментарий по градации", g.comment)}
+          ${textMiniBlock("Дополнительный комментарий", g.extraComment)}
+          ${checksMiniBlock([
+            ["Проставлены все надсечки", g.checklist.notches],
+            ["Все детали есть в печати", g.checklist.printDetails],
+            ["Название на лекалах обновлено", g.checklist.nameUpdated],
+            ["Файл лекал отправлен в Telegram с артикулом и названием", g.checklist.sentTelegram]
+          ])}
+        </section>
+      `;
+    }
+
+    function adminBlock(m) {
+      return `
+        <section class="section">
+          <h3>Администрирование заявки</h3>
+          <div class="grid three">
+            <label><span>Статус</span><select id="adminStatus">${adminStatuses(m).map(s => `<option ${s === m.status ? "selected" : ""}>${s}</option>`).join("")}</select></label>
+            <label><span>Ответственный</span><select id="adminResponsible">${state.users.filter(u => u.active).map(u => `<option value="${u.id}" ${u.id === m.currentResponsibleUserId ? "selected" : ""}>${u.name}</option>`).join("")}</select></label>
+            <label><span>Дедлайн</span><input id="adminDeadline" type="date" value="${m.deadline || ""}"></label>
+          </div>
+          <div class="actions">
+            <button class="primary" id="adminSave">Сохранить статус</button>
+            ${!isDeleted(m) ? `<button class="danger" id="deleteModel">Удалить из разработки</button>` : ""}
+          </div>
+        </section>
+      `;
+    }
+
+    function adminStatuses(m) {
+      const dynamic = [];
+      m.samples.forEach(s => dynamic.push(`Отшив образца ${s.number}`, `Образец ${s.number} в работе`, `Образец ${s.number} готов`));
+      m.corrections.forEach(c => dynamic.push(`Поданы корректировки ${c.number}`, `Корректировки ${c.number} в работе`, `Корректировки ${c.number} готовы`));
+      return [...new Set([...statusList, ...dynamic])];
+    }
+
+    function commentsTab(m) {
+      m.unread[currentUser().id] = 0;
+      persist();
+      return `
+        <section class="section">
+          <h3>Комментарии</h3>
+          <div class="chat">
+            ${m.comments.map(c => `
+              <div class="comment">
+                <div class="comment-head"><span>${escapeHtml(c.author)}</span><span>${escapeHtml(c.date)}</span></div>
+                <p>${escapeHtml(c.text)}</p>
+              </div>
+            `).join("") || `<div class="empty">Комментариев пока нет</div>`}
+            ${area("newComment", "Новый комментарий", "", "")}
+            <button class="primary" id="sendComment">Отправить</button>
+          </div>
+        </section>
+      `;
+    }
+
+    function constructorPayTab(m) {
+      const patternTotal = Number(m.payments.constructor[0]?.amount || 0);
+      const gradingTotal = Number(m.payments.constructor[1]?.amount || 0);
+      const printTotal = correctionPrintTotal(m);
+      const total = patternTotal + printTotal + gradingTotal;
+      return `
+        <section class="section">
+          <h3>Оплата конструктора</h3>
+          <div class="pay-summary">
+            ${stat(money(patternTotal), "лекала")}
+            ${stat(money(printTotal), "печать")}
+            ${stat(money(gradingTotal), "градация")}
+            ${stat(money(total), "общая сумма", "total")}
+          </div>
+          ${m.payments.constructor.map((p, index) => payRow(p, "constructor", index)).join("")}
+        </section>
+      `;
+    }
+
+    function workshopPayTab(m) {
+      const ready = m.samples.filter(s => s.readyAt);
+      return `
+        <section class="section">
+          <h3>Оплата и расход цеха</h3>
+          ${ready.map((s, index) => samplePayRow(s, index)).join("") || `<div class="empty">Оплат по образцам пока нет</div>`}
+        </section>
+      `;
+    }
+
+    function historyTab(m) {
+      const history = (m.history || []).filter(item => !isTechnicalHistory(item));
+      return `
+        <section class="section">
+          <h3>История</h3>
+          ${history.map(h => `<div class="history-row"><span class="muted">${escapeHtml(h.date)}</span><strong>${escapeHtml(h.action)}</strong><span class="muted">${escapeHtml(h.user)}</span></div>`).join("")}
+        </section>
+      `;
+    }
+
+    function statsTab(m) {
+      const constructorTotal = m.payments.constructor.reduce((s, p) => s + Number(p.amount || 0), 0);
+      const readySamples = m.samples.filter(s => s.readyAt);
+      const workshopTotal = readySamples.reduce((s, p) => s + Number(p.cost || 0), 0);
+      const fabric = readySamples.reduce((s, p) => s + Number(p.fabricUsage || 0), 0);
+      const days = Math.max(1, Math.ceil((new Date(today()) - new Date(m.createdAt)) / 86400000) + 1);
+      return `
+        <section class="section">
+          <h3>Статистика</h3>
+          <div class="stat-grid">
+            ${stat(readySamples.length, "образцов отшито")}
+            ${stat(money(constructorTotal), "конструктору")}
+            ${stat(money(workshopTotal), "цеху")}
+            ${stat(fabric.toFixed(2), "расход ткани")}
+            ${stat(days, "дней от создания")}
+          </div>
+        </section>
+      `;
+    }
+
+    function accessTab() {
+      return `
+        <section class="section">
+          <h3>Доступы</h3>
+          <div class="access-row">
+            ${field("newUserName", "Имя", "")}
+            ${field("newUserLogin", "Логин", "")}
+            ${field("newUserPassword", "Пароль", "")}
+            <label><span>Роль</span><select id="newUserRole">${roles.map(r => `<option>${r}</option>`).join("")}</select></label>
+            <span></span>
+            <button class="primary" id="createUser">Создать</button>
+          </div>
+          ${state.users.map(u => `
+            <div class="access-row">
+              <label><span>Имя</span><input data-user="${u.id}" data-user-field="name" value="${escapeAttr(u.name)}"></label>
+              <label><span>Логин</span><input data-user="${u.id}" data-user-field="login" value="${escapeAttr(u.login)}"></label>
+              <label><span>Пароль</span><input data-user="${u.id}" data-user-field="password" value="${escapeAttr(u.password)}"></label>
+              <label><span>Роль</span><select data-user="${u.id}" data-user-field="role">${roles.map(r => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select></label>
+              <label><span>Доступ</span><select data-user="${u.id}" data-user-field="active"><option value="true" ${u.active ? "selected" : ""}>Активен</option><option value="false" ${!u.active ? "selected" : ""}>Отключен</option></select></label>
+              <button class="danger" data-delete-user="${u.id}" ${u.id === currentUser().id ? "disabled" : ""}>Удалить</button>
+            </div>
+          `).join("")}
+        </section>
+      `;
+    }
+
+    function actionButtons(m) {
+      if (isDeleted(m) || m.status === "Завершено") return "";
+      const user = currentUser();
+      const isResponsible = m.currentResponsibleUserId === user.id;
+      const ownerAction = isOwner() || isAdmin();
+      const constructorAction = user.role === "Конструктор" && isResponsible;
+      const workshopAction = user.role === "Цех" && isResponsible;
+      const b = [];
+      if (ownerAction && m.status === "Черновик") b.push(`<button data-action="make-new">Сохранить как новая модель</button>`);
+      if (ownerAction && ["Черновик", "Новая модель"].includes(m.status)) b.push(`<button class="primary" data-action="send-constructor">Передать конструктору</button>`);
+      if (constructorAction && m.status === "Разработка лекал") b.push(`<button class="primary" data-action="take-pattern">Взять в работу</button>`);
+      if (constructorAction && m.status === "Лекала в работе") b.push(`<button class="primary" data-action="patterns-ready">Лекала готовы</button>`);
+      if (ownerAction && (m.status === "Лекала готовы" || /Корректировки \d+ готовы/.test(m.status))) b.push(`<button class="primary" data-action="send-workshop">Передать цеху</button>`);
+      if (workshopAction && /^Отшив образца \d+$/.test(m.status)) b.push(`<button class="primary" data-action="take-sample">Взять в работу</button>`);
+      if (workshopAction && /^Образец \d+ в работе$/.test(m.status)) b.push(`<button class="primary" data-action="sample-ready">Образец готов</button>`);
+      if (ownerAction && /^Образец \d+ готов$/.test(m.status)) {
+        b.push(`<button class="primary" data-action="create-correction">Подать корректировки</button>`);
+        b.push(`<button data-action="send-grading">Подать на градацию</button>`);
+      }
+      if (constructorAction && /^Поданы корректировки \d+$/.test(m.status)) b.push(`<button class="primary" data-action="take-correction">Взять в работу корректировки</button>`);
+      if (constructorAction && /^Корректировки \d+ в работе$/.test(m.status)) b.push(`<button class="primary" data-action="correction-ready">Корректировки готовы</button>`);
+      if (constructorAction && m.status === "Передано на градацию") b.push(`<button class="primary" data-action="take-grading">Взять в работу градацию</button>`);
+      if (constructorAction && m.status === "Градация в работе") b.push(`<button class="primary" data-action="grading-ready">Градация готова</button>`);
+      if (ownerAction && m.status === "Градация готова") b.push(`<button class="primary" data-action="finish-model">Модель завершена</button>`);
+      return b.join("");
+    }
+
+    function bindDetail() {
+      document.getElementById("backHome").onclick = () => { state.view = "dashboard"; state.activeModelId = ""; persist(); render(); };
+      document.querySelectorAll("[data-tab]").forEach(btn => btn.onclick = () => { state.activeTab = btn.dataset.tab; persist(); render(); });
+      document.querySelectorAll("[data-action]").forEach(btn => btn.onclick = () => runAction(btn.dataset.action));
+      bindPrimary();
+      bindPayments();
+      bindAccess();
+      const addLink = document.getElementById("addLink");
+      if (addLink) addLink.onclick = () => { currentModel().links.push(""); persist(); render(); };
+      const send = document.getElementById("sendComment");
+      if (send) send.onclick = sendComment;
+      const adminSave = document.getElementById("adminSave");
+      if (adminSave) adminSave.onclick = adminSaveModel;
+      const del = document.getElementById("deleteModel");
+      if (del) del.onclick = openDeleteModal;
+      const photoInput = document.getElementById("modelPhotoInput");
+      if (photoInput) photoInput.onchange = handleModelPhotoUpload;
+      const removePhoto = document.getElementById("removeModelPhoto");
+      if (removePhoto) removePhoto.onclick = () => {
+        const m = currentModel();
+        m.photoDataUrl = "";
+        addHistory(m, "Удалено фото модели");
+        persist();
+        render();
+      };
+      bindPhotoOpeners();
+    }
+
+    function bindPrimary() {
+      document.querySelectorAll("[data-field]").forEach(el => {
+        const key = el.dataset.field;
+        if (key.startsWith("newComment") || key.startsWith("newUser")) return;
+        let initialValue = el.value;
+        el.disabled = !canEditPrimary();
+        const updateValue = () => {
+          const m = currentModel();
+          if (key.startsWith("link:")) m.links[Number(key.split(":")[1])] = el.value;
+          else if (key in m) m[key] = el.value;
+          if (key === "constructorUserId") replaceParticipantByRole(m, el.value, "Конструктор");
+          if (key === "workshopUserId") replaceParticipantByRole(m, el.value, "Цех");
+          persist();
+        };
+        el.oninput = updateValue;
+        el.onchange = () => {
+          const changed = el.value !== initialValue;
+          updateValue();
+          if (changed) {
+            addHistory(currentModel(), `Изменено поле "${labelFor(key)}"`);
+            initialValue = el.value;
+            persist();
+          }
+        };
+      });
+    }
+
+    function bindPayments() {
+      document.querySelectorAll("[data-pay]").forEach(btn => btn.onclick = () => {
+        if (!canPay()) return;
+        const [type, index] = btn.dataset.pay.split(":");
+        const m = currentModel();
+        const item = type === "constructor" ? m.payments.constructor[Number(index)] : m.samples.filter(s => s.readyAt)[Number(index)];
+        if (item.paid) return;
+        item.paid = true;
+        item.paidAt = today();
+        addHistory(m, `Оплачено: ${type === "constructor" ? item.work : "Образец " + item.number}`);
+        persist();
+        render();
+      });
+    }
+
+    function bindAccess() {
+      document.querySelectorAll("[data-user-field]").forEach(el => {
+        el.onchange = el.oninput = () => {
+          const user = state.users.find(u => u.id === el.dataset.user);
+          if (!user) return;
+          user[el.dataset.userField] = el.dataset.userField === "active" ? el.value === "true" : el.value;
+          persist();
+          renderShell();
+        };
+      });
+      const create = document.getElementById("createUser");
+      if (create) create.onclick = () => {
+        const name = document.querySelector("[data-field='newUserName']").value.trim();
+        const login = document.querySelector("[data-field='newUserLogin']").value.trim();
+        const password = document.querySelector("[data-field='newUserPassword']").value.trim();
+        const role = document.getElementById("newUserRole").value;
+        if (!name || !login || !password) return;
+        state.users.push({ id: uid(), name, login, password, role, active: true });
+        persist();
+        render();
+      };
+      document.querySelectorAll("[data-delete-user]").forEach(btn => btn.onclick = () => {
+        state.users = state.users.filter(u => u.id !== btn.dataset.deleteUser);
+        persist();
+        render();
+      });
+    }
+
+    function runAction(action) {
+      const m = currentModel();
+      const n = getCurrentNumber(m);
+      const actions = {
+        "make-new": () => {
+          m.status = "Новая модель";
+          m.currentResponsibleUserId = m.ownerUserId;
+          m.deadline = "";
+          addHistory(m, "Черновик сохранен как новая модель");
+          saveAndRender();
+        },
+        "send-constructor": () => {
+          if (!m.constructorUserId) return alert("Выберите конструктора");
+          m.status = "Разработка лекал";
+          m.currentResponsibleUserId = m.constructorUserId;
+          m.deadline = "";
+          m.pattern.sentAt = today();
+          replaceParticipantByRole(m, m.constructorUserId, "Конструктор");
+          addHistory(m, "Задача передана конструктору");
+          saveAndRender();
+        },
+        "take-pattern": () => askDeadline("Дата сдачи лекал", date => {
+          m.status = "Лекала в работе"; m.deadline = date; m.pattern.acceptedAt = today(); m.pattern.deadline = date; addHistory(m, "Конструктор взял лекала в работу"); saveAndRender();
+        }),
+        "patterns-ready": () => checklistModal("Лекала готовы", checklistFields("pattern"), [{ id: "cost", label: "Стоимость за лекала", type: "number", required: true }], data => {
+          m.pattern.checklist = pickChecklist(data); m.pattern.cost = Number(data.cost); m.pattern.readyAt = today();
+          m.payments.constructor[0].amount = Number(data.cost); m.status = "Лекала готовы"; m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; addHistory(m, "Лекала готовы"); saveAndRender();
+        }),
+        "send-workshop": () => formModal("Передать цеху", [{ id: "comment", label: `Комментарий для цеха к образцу ${m.samples.length + 1}`, type: "textarea", required: true }], data => {
+          if (!m.workshopUserId) return alert("Выберите цех");
+          const number = m.samples.length + 1;
+          m.samples.push(sample(number, { status: `Отшив образца ${number}`, sentAt: today(), ownerComment: data.comment }));
+          m.status = `Отшив образца ${number}`; m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); addHistory(m, `Передано в цех на отшив образца ${number}`); saveAndRender();
+        }),
+        "take-sample": () => askDeadline(`Дата сдачи образца ${n}`, date => {
+          const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; m.status = s.status; m.deadline = date; addHistory(m, `Цех взял в работу образец ${s.number}`); saveAndRender();
+        }),
+        "sample-ready": () => formModal(`Образец ${n} готов`, [
+          { id: "comment", label: "Комментарий цеха", type: "textarea", required: true },
+          { id: "fabric", label: "Расход ткани", type: "number", required: true },
+          { id: "hardware", label: "Использованная фурнитура", type: "textarea", required: true },
+          { id: "cost", label: "Стоимость за образец", type: "number", required: true }
+        ], data => {
+          const s = currentSample(m); s.status = `Образец ${s.number} готов`; s.readyAt = today(); s.workshopComment = data.comment; s.fabricUsage = Number(data.fabric); s.usedHardware = data.hardware; s.cost = Number(data.cost);
+          m.status = s.status; m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; addHistory(m, `Образец ${s.number} готов`); saveAndRender();
+        }),
+        "create-correction": () => formModal(`Подать корректировки ${m.corrections.length + 1}`, [
+          { id: "text", label: "Текст корректировок", type: "textarea", required: true },
+          { id: "link", label: "Ссылка на Google Drive с фото/видео", type: "text", required: false }
+        ], data => {
+          const number = m.corrections.length + 1; m.corrections.push(correction(number, { text: data.text, link: data.link }));
+          m.status = `Поданы корректировки ${number}`; m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; addHistory(m, `Поданы корректировки ${number}`); saveAndRender();
+        }),
+        "take-correction": () => askDeadline(`Дата сдачи корректировок ${n}`, date => {
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; m.status = c.status; m.deadline = date; addHistory(m, `Конструктор взял в работу корректировки ${c.number}`); saveAndRender();
+        }),
+        "correction-ready": () => checklistModal(`Корректировки ${n} готовы`, checklistFields("correction"), [{ id: "printCost", label: "Сумма за печать", type: "number", required: true }], data => {
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); m.status = c.status; m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; addHistory(m, `Корректировки ${c.number} готовы`); saveAndRender();
+        }),
+        "send-grading": () => formModal("Подать на градацию", [
+          { id: "finalName", label: "Финальное название модели", type: "text", required: true, value: m.title },
+          { id: "sizes", label: "Актуальные размеры", type: "text", required: true, value: m.sizeRange },
+          { id: "comment", label: "Обновленный комментарий по градации", type: "textarea", required: true, value: m.gradingComment },
+          { id: "extraComment", label: "Дополнительный комментарий", type: "textarea", required: true }
+        ], data => {
+          m.grading = { ...m.grading, ...data, sentAt: today() }; m.status = "Передано на градацию"; m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; addHistory(m, "Модель передана на градацию"); saveAndRender();
+        }),
+        "take-grading": () => askDeadline("Дата готовности градации", date => {
+          m.status = "Градация в работе"; m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; addHistory(m, "Конструктор взял градацию в работу"); saveAndRender();
+        }),
+        "grading-ready": () => checklistModal("Градация готова", [
+          { id: "notches", label: "Проставлены все надсечки" },
+          { id: "printDetails", label: "Все детали есть в печати" },
+          { id: "nameUpdated", label: "Название на лекалах обновлено" },
+          { id: "sentTelegram", label: "Файл лекал отправлен в Telegram с артикулом и названием" }
+        ], [{ id: "cost", label: "Стоимость за градацию", type: "number", required: true }], data => {
+          m.grading.checklist = { notches: true, printDetails: true, nameUpdated: true, sentTelegram: true }; m.grading.cost = Number(data.cost); m.grading.readyAt = today();
+          m.payments.constructor[1].amount = Number(data.cost); m.status = "Градация готова"; m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; addHistory(m, "Градация готова"); saveAndRender();
+        }),
+        "finish-model": () => { m.status = "Завершено"; m.deadline = ""; addHistory(m, "Модель завершена"); saveAndRender(); }
+      };
+      actions[action]?.();
+    }
+
+    function createModel() {
+      const model = makeModel({ id: uid(), createdByUserId: currentUser().id, ownerUserId: currentUser().id, currentResponsibleUserId: currentUser().id, participants: [currentUser().id], title: "Новая модель", createdAt: today(), updatedAt: today() });
+      state.models.unshift(model);
+      state.activeModelId = model.id;
+      state.view = "detail";
+      state.activeTab = "Основная";
+      persist();
+      render();
+    }
+
+    function saveAndRender() { persist(); render(); }
+    function getCurrentNumber(m) { return Number((m.status.match(/\d+/) || [m.samples.length || m.corrections.length || 1])[0]); }
+    function currentSample(m) { const n = getCurrentNumber(m); return m.samples.find(s => s.number === n) || m.samples[m.samples.length - 1]; }
+    function currentCorrection(m) { const n = getCurrentNumber(m); return m.corrections.find(c => c.number === n) || m.corrections[m.corrections.length - 1]; }
+    function askDeadline(title, cb) { formModal(title, [{ id: "deadline", label: "Плановая дата готовности", type: "date", required: true }], data => cb(data.deadline)); }
+    function checklistFields() {
+      return [
+        { id: "notches", label: "Проставлены все надсечки" },
+        { id: "printDetails", label: "Все детали есть в печати" },
+        { id: "signed", label: "На лекалах подписан артикул и название модели" }
+      ];
+    }
+    function pickChecklist(data) { return { notches: !!data.notches, printDetails: !!data.printDetails, signed: !!data.signed }; }
+
+    function formModal(title, fields, onSubmit) {
+      const root = document.getElementById("modalRoot");
+      root.classList.remove("hidden");
+      root.innerHTML = `
+        <div class="modal">
+          <h3>${escapeHtml(title)}</h3>
+          <div class="grid">${fields.map(modalField).join("")}</div>
+          <div class="actions"><button id="modalCancel">Отмена</button><button class="primary" id="modalSubmit">Сохранить</button></div>
+        </div>
+      `;
+      document.getElementById("modalCancel").onclick = closeModal;
+      document.getElementById("modalSubmit").onclick = () => {
+        const data = {};
+        for (const f of fields) {
+          const el = document.getElementById("modal-" + f.id);
+          data[f.id] = f.type === "checkbox" ? el.checked : el.value.trim();
+          if (f.required && !data[f.id]) return alert("Заполните обязательные поля");
+        }
+        closeModal();
+        onSubmit(data);
+      };
+    }
+
+    function checklistModal(title, checks, extraFields, onSubmit) {
+      formModal(title, [...checks.map(c => ({ ...c, type: "checkbox", required: true })), ...extraFields], onSubmit);
+    }
+
+    function modalField(f) {
+      const value = escapeAttr(f.value || "");
+      if (f.type === "textarea") return `<label class="span-2"><span>${f.label}${f.required ? " *" : ""}</span><textarea id="modal-${f.id}">${escapeHtml(f.value || "")}</textarea></label>`;
+      if (f.type === "checkbox") return `<label class="check span-2"><input id="modal-${f.id}" type="checkbox"><span>${f.label}</span></label>`;
+      return `<label><span>${f.label}${f.required ? " *" : ""}</span><input id="modal-${f.id}" type="${f.type || "text"}" value="${value}"></label>`;
+    }
+
+    function closeModal() {
+      const root = document.getElementById("modalRoot");
+      root.classList.add("hidden");
+      root.innerHTML = "";
+      root.onclick = null;
+    }
+
+    function sendComment() {
+      const m = currentModel();
+      const text = document.querySelector("[data-field='newComment']").value.trim();
+      if (!text) return;
+      m.comments.unshift({ id: uid(), author: currentUser().name, authorId: currentUser().id, text, date: nowText() });
+      const notify = [...new Set([...m.participants, ...state.users.filter(u => u.role === "Админ").map(u => u.id)])].filter(id => id !== currentUser().id);
+      notify.forEach(id => m.unread[id] = Number(m.unread[id] || 0) + 1);
+      addHistory(m, "Добавлен комментарий");
+      persist();
+      render();
+    }
+
+    function handleModelPhotoUpload(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith("image/")) return alert("Выберите файл изображения");
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        const maxSide = 1200;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const m = currentModel();
+        m.photoDataUrl = canvas.toDataURL("image/jpeg", 0.86);
+        addHistory(m, "Обновлено фото модели");
+        URL.revokeObjectURL(objectUrl);
+        persist();
+        render();
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        alert("Не удалось загрузить изображение");
+      };
+      img.src = objectUrl;
+    }
+
+    function bindPhotoOpeners() {
+      document.querySelectorAll("[data-photo-model]").forEach(photo => {
+        photo.onclick = event => {
+          event.stopPropagation();
+          const model = state.models.find(m => m.id === photo.dataset.photoModel);
+          openPhotoModal(model?.photoDataUrl);
+        };
+      });
+    }
+
+    function openPhotoModal(src) {
+      if (!src) return;
+      const root = document.getElementById("modalRoot");
+      root.classList.remove("hidden");
+      root.innerHTML = `
+        <div class="photo-modal">
+          <button id="photoModalClose" aria-label="Закрыть">×</button>
+          <img src="${escapeAttr(src)}" alt="Фото модели">
+        </div>
+      `;
+      root.onclick = event => {
+        if (event.target === root) closeModal();
+      };
+      document.getElementById("photoModalClose").onclick = closeModal;
+    }
+
+    function adminSaveModel() {
+      const m = currentModel();
+      m.status = document.getElementById("adminStatus").value;
+      m.currentResponsibleUserId = document.getElementById("adminResponsible").value;
+      m.deadline = document.getElementById("adminDeadline").value;
+      addHistory(m, "Админ изменил статус/ответственного");
+      persist();
+      render();
+    }
+
+    function openDeleteModal() {
+      formModal("Удалить из разработки", [
+        { id: "reason", label: "Причина удаления", type: "textarea", required: true },
+        { id: "confirm1", label: "Я понимаю, что модель уйдет в статус Удалено из разработки", type: "checkbox", required: true },
+        { id: "confirm2", label: "Я подтверждаю удаление из активной разработки", type: "checkbox", required: true }
+      ], data => {
+        const m = currentModel();
+        m.status = "Удалено из разработки";
+        m.deletedReason = data.reason;
+        m.deadline = "";
+        addHistory(m, `Модель удалена из разработки. Причина: ${data.reason}`);
+        persist();
+        render();
+      });
+    }
+
+    function loginAs(id) {
+      const user = state.users.find(u => u.id === id && u.active);
+      if (!user) return;
+      state.currentUserId = user.id;
+      state.view = "dashboard";
+      persist();
+      render();
+    }
+
+    document.getElementById("loginButton").onclick = () => {
+      const login = document.getElementById("loginInput").value.trim();
+      const password = document.getElementById("passwordInput").value;
+      const user = state.users.find(u => u.login === login && u.password === password && u.active);
+      if (!user) return document.getElementById("loginError").textContent = "Доступ не найден или отключен";
+      loginAs(user.id);
+    };
+    document.getElementById("passwordInput").onkeydown = e => { if (e.key === "Enter") document.getElementById("loginButton").click(); };
+    document.getElementById("logoutButton").onclick = () => { state.currentUserId = ""; state.activeModelId = ""; persist(); render(); };
+
+    function modelPhotoThumb(m) {
+      if (m.photoDataUrl) return `<img class="model-photo" src="${escapeAttr(m.photoDataUrl)}" data-photo-model="${escapeAttr(m.id)}" alt="Фото модели">`;
+      return `<div class="model-photo-placeholder">Без фото</div>`;
+    }
+    function modelPhotoSection(m) {
+      const preview = m.photoDataUrl
+        ? `<img class="photo-preview" src="${escapeAttr(m.photoDataUrl)}" data-photo-model="${escapeAttr(m.id)}" alt="Фото модели">`
+        : `<div class="model-photo-placeholder">Фото не загружено</div>`;
+      return `
+        <div class="primary-photo-block">
+          ${preview}
+          ${canEditPrimary() ? `
+            <div class="actions">
+              <label class="file-button">
+                <span>${m.photoDataUrl ? "Заменить фото" : "Загрузить фото"}</span>
+                <input id="modelPhotoInput" type="file" accept="image/*">
+              </label>
+              ${m.photoDataUrl ? `<button id="removeModelPhoto" class="danger">Удалить фото</button>` : ""}
+            </div>
+          ` : ""}
+        </div>
+      `;
+    }
+    function field(key, label, value, type = "text") { return `<label><span>${label}</span><input data-field="${key}" type="${type}" value="${escapeAttr(value || "")}"></label>`; }
+    function area(key, label, value, cls = "") { return `<label class="${cls}"><span>${label}</span><textarea data-field="${key}">${escapeHtml(value || "")}</textarea></label>`; }
+    function selectField(key, label, value, options) {
+      return `<label><span>${label}</span><select data-field="${key}">${options.map(option => `<option ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select></label>`;
+    }
+    function selectUserField(key, label, role, value) {
+      const opts = state.users.filter(u => u.role === role && u.active).map(u => `<option value="${u.id}" ${u.id === value ? "selected" : ""}>${u.name}</option>`).join("");
+      return `<label><span>${label}</span><select data-field="${key}" ${canEditPrimary() ? "" : "disabled"}>${opts}</select></label>`;
+    }
+    function readonly(label, value) { return `<div><span class="muted">${label}</span><p>${escapeHtml(value || "-")}</p></div>`; }
+    function statusReadonly(label, status) { return `<div><span class="muted">${label}</span><p>${statusBadge(status)}</p></div>`; }
+    function areaReadonly(label, value) { return `<div class="span-4"><span class="muted">${label}</span><p>${escapeHtml(value || "-")}</p></div>`; }
+    function checkView(label, checked) { return `<span class="pill ${checked ? "ok" : ""}">${checked ? "✓" : "○"} ${escapeHtml(label)}</span>`; }
+    function statusMiniBlock(status) {
+      return `<div class="mini-block"><span class="mini-title">Статус</span>${statusBadge(status, "status-main")}</div>`;
+    }
+    function datesMiniBlock(items) {
+      return `<div class="mini-block"><span class="mini-title">Даты</span><div class="date-row">${items.map(([label, value]) => dateItem(label, value)).join("")}</div></div>`;
+    }
+    function dateItem(label, value) {
+      return `<div class="date-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "-")}</strong></div>`;
+    }
+    function textMiniBlock(label, value, tone = "") {
+      return `<div class="text-block ${tone}"><span>${escapeHtml(label)}</span><p>${escapeHtml(value || "-")}</p></div>`;
+    }
+    function checksMiniBlock(items) {
+      return `<div class="mini-block"><span class="mini-title">Проверочный чек-лист</span><div class="check-row">${items.map(([label, checked]) => checkView(label, checked)).join("")}</div></div>`;
+    }
+    function payRow(p, type, index) {
+      return `<div class="table-row"><strong>${escapeHtml(p.work)}</strong><span>${money(p.amount)}</span><span>${p.paid ? "Оплачено" : "Не оплачено"}</span><span>${p.paidAt || "-"}</span>${canPay() && !p.paid ? `<button data-pay="${type}:${index}">Оплачено</button>` : `<span></span>`}</div>`;
+    }
+    function samplePayRow(s, index) {
+      return `<div class="table-row workshop-pay-row"><strong>Образец ${s.number}</strong><span>${money(s.cost)}</span><span>${s.fabricUsage || 0} м</span><span>${escapeHtml(s.usedHardware || "-")}</span><span>${s.paid ? "Оплачено " + s.paidAt : "Не оплачено"}</span>${canPay() && !s.paid ? `<button data-pay="workshop:${index}">Оплачено</button>` : `<span></span>`}</div>`;
+    }
+    function stat(value, label, cls = "") { return `<div class="stat ${cls}"><strong>${escapeHtml(String(value))}</strong><span class="muted">${label}</span></div>`; }
+    function labelFor(key) { return ({ brand: "Бренд", title: "Название", article: "Артикул", sizeRange: "Размерный ряд", material: "Материал", hardware: "Фурнитура", description: "Описание", important: "Важные детали", gradingComment: "Комментарий по градации", constructorUserId: "Конструктор", workshopUserId: "Цех" })[key] || key; }
+    function escapeHtml(v) { return String(v).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[ch])); }
+    function escapeAttr(v) { return escapeHtml(v).replace(/`/g, "&#096;"); }
+
+    render();
+  </script>
+</body>
+</html>
