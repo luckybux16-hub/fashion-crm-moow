@@ -326,6 +326,13 @@
 
   <script>
     const storeKey = "fashion-crm-local-v3";
+    const supabaseConfig = {
+      url: "__SUPABASE_URL__",
+      anonKey: "__SUPABASE_ANON_KEY__"
+    };
+    let remoteReady = false;
+    let remoteError = "";
+    let remoteSaveTimer = null;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
     const users = [
       { id: "u-admin", name: "Админ", login: "admin", password: "admin", role: "Админ", active: true },
@@ -429,6 +436,10 @@
       let data;
       try { data = JSON.parse(localStorage.getItem(storeKey)) || structuredClone(seed); }
       catch { data = structuredClone(seed); }
+      return normalizeStateData(data);
+    }
+
+    function normalizeStateData(data) {
       data.statsPeriod = data.statsPeriod || "month";
       data.allResponsibleFilter = data.allResponsibleFilter || "";
       (data.models || []).forEach(model => {
@@ -452,7 +463,70 @@
       return action.includes('"newComment"') || action.includes('"newUser') || action.includes('"link:');
     }
 
-    function persist() { localStorage.setItem(storeKey, JSON.stringify(state)); }
+    function hasSupabase() {
+      return supabaseConfig.url.startsWith("http") && supabaseConfig.anonKey && !supabaseConfig.anonKey.includes("__");
+    }
+
+    async function supabaseRequest(path, options = {}) {
+      const headers = {
+        apikey: supabaseConfig.anonKey,
+        authorization: `Bearer ${supabaseConfig.anonKey}`,
+        "content-type": "application/json",
+        ...(options.headers || {})
+      };
+      const response = await fetch(`${supabaseConfig.url.replace(/\/$/, "")}${path}`, { ...options, headers });
+      if (!response.ok) throw new Error(await response.text());
+      if (response.status === 204) return null;
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
+    }
+
+    async function initRemoteState() {
+      if (!hasSupabase()) return;
+      try {
+        const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data");
+        if (Array.isArray(rows) && rows[0]?.data) {
+          state = normalizeStateData(rows[0].data);
+          localStorage.setItem(storeKey, JSON.stringify(state));
+        }
+        remoteReady = true;
+        remoteError = "";
+        await saveRemoteNow();
+        render();
+      } catch (error) {
+        remoteReady = false;
+        remoteError = "Supabase недоступен";
+        console.warn("Supabase sync failed", error);
+        render();
+      }
+    }
+
+    function persist() {
+      localStorage.setItem(storeKey, JSON.stringify(state));
+      if (remoteReady) queueRemoteSave();
+    }
+
+    function queueRemoteSave() {
+      clearTimeout(remoteSaveTimer);
+      remoteSaveTimer = setTimeout(() => {
+        saveRemoteNow().catch(error => {
+          remoteReady = false;
+          remoteError = "Не сохранено в Supabase";
+          console.warn("Supabase save failed", error);
+          render();
+        });
+      }, 500);
+    }
+
+    async function saveRemoteNow() {
+      if (!hasSupabase()) return;
+      await supabaseRequest("/rest/v1/crm_state?on_conflict=id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ id: "main", data: state, updated_at: new Date().toISOString() })
+      });
+    }
+
     persist();
     function currentUser() { return state.users.find(u => u.id === state.currentUserId) || null; }
     function currentModel() { return state.models.find(m => m.id === state.activeModelId) || null; }
@@ -552,6 +626,7 @@
       document.getElementById("sessionName").textContent = user.name;
       document.getElementById("sessionRole").textContent = user.role;
       document.getElementById("mainNav").innerHTML = `
+        <span class="pill ${remoteReady ? "ok" : remoteError ? "danger" : ""}">${hasSupabase() ? (remoteReady ? "Онлайн база" : remoteError || "Подключение") : "Локальный режим"}</span>
         <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
         <button class="nav-btn ${state.view === "all" ? "active" : ""}" data-view="all">Все модели</button>
         ${canViewGlobalStats() ? `<button class="nav-btn ${state.view === "stats" ? "active" : ""}" data-view="stats">Статистика</button>` : ""}
@@ -1510,6 +1585,7 @@
     function escapeAttr(v) { return escapeHtml(v).replace(/`/g, "&#096;"); }
 
     render();
+    initRemoteState();
   </script>
 </body>
 </html>
