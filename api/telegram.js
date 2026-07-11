@@ -11,6 +11,15 @@ export default async function handler(request, response) {
   try {
     const { action, chatId, text, login, email } = request.body || {};
 
+    if (action === "checkBot") {
+      const meResponse = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+      const mePayload = await meResponse.json();
+      if (!meResponse.ok) {
+        return response.status(meResponse.status).json({ error: mePayload.description || "Telegram token check failed" });
+      }
+      return response.status(200).json({ ok: true, bot: mePayload.result });
+    }
+
     if (action === "findChatId") {
       const needleValues = [login, email].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
       if (!needleValues.length) {
@@ -27,11 +36,21 @@ export default async function handler(request, response) {
       const match = updates.find(update => {
         const message = update.message;
         const messageText = String(message?.text || "").trim().toLowerCase();
-        return message?.chat?.id && needleValues.some(value => messageText === `/start ${value}` || messageText.includes(value));
+        const normalized = messageText.replace(/^\/start(@[a-z0-9_]+)?\s*/i, "").trim();
+        return message?.chat?.id && needleValues.some(value => normalized === value || messageText === `/start ${value}` || messageText.includes(value));
       });
 
       if (!match) {
-        return response.status(404).json({ error: "chat id not found" });
+        return response.status(404).json({
+          error: "chat id not found",
+          hint: `Ask the user to send /start ${needleValues[0]} to the bot, then click Find ID again.`,
+          updatesChecked: updates.length,
+          recentMessages: updates.slice(0, 5).map(update => ({
+            text: update.message?.text || "",
+            username: update.message?.chat?.username || "",
+            name: [update.message?.chat?.first_name, update.message?.chat?.last_name].filter(Boolean).join(" ")
+          }))
+        });
       }
 
       return response.status(200).json({

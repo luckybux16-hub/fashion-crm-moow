@@ -1587,6 +1587,7 @@
           <div class="mini-block">
             <span class="mini-title">Как подключить Telegram</span>
             <p class="muted">Пользователь открывает вашего бота, пишет команду <strong>/start логин</strong>, затем админ нажимает “Найти ID” в строке этого пользователя. После этого включите Telegram и сохраните доступы.</p>
+            <div class="actions"><button id="checkTelegramBot">Проверить бота</button></div>
           </div>
           ${usersForEdit.map(u => `
             <div class="access-row">
@@ -1845,13 +1846,20 @@
         const user = accessDraft.find(u => u.id === btn.dataset.findTelegram);
         if (!user) return;
         findTelegramChatId(user).then(result => {
-          if (!result?.chatId) return alert(`Chat ID не найден. Попросите пользователя написать боту: /start ${user.login || user.email}`);
+          if (!result?.chatId) return alert(telegramLookupError(result, user));
           user.telegramChatId = result.chatId;
           user.telegramEnabled = true;
           render();
           alert(`Chat ID найден: ${result.chatId}. Нажмите “Сохранить доступы”.`);
         });
       });
+      const checkBot = document.getElementById("checkTelegramBot");
+      if (checkBot) checkBot.onclick = () => {
+        checkTelegramBotStatus().then(result => {
+          if (result?.ok) return alert(`Бот подключен: @${result.bot?.username || "без username"}`);
+          alert(`Бот не отвечает: ${result?.error || "неизвестная ошибка"}`);
+        });
+      };
       bindBackupControls();
     }
 
@@ -1903,6 +1911,14 @@
       [...new Set(userIds.filter(Boolean))].forEach(userId => notifyUser(userId, message));
     }
 
+    function adminUserIds() {
+      return state.users.filter(user => user.role === "Админ" && user.active).map(user => user.id);
+    }
+
+    function notifyMovement(model, title, userIds = []) {
+      notifyUsers([...userIds, ...adminUserIds()], taskNotification(model, title));
+    }
+
     async function findTelegramChatId(user) {
       try {
         const response = await fetch("/api/telegram", {
@@ -1910,12 +1926,40 @@
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ action: "findChatId", login: user.login, email: user.email })
         });
-        if (!response.ok) return null;
-        return await response.json();
+        const payload = await response.json().catch(() => ({}));
+        return response.ok ? payload : { ok: false, ...payload };
       } catch (error) {
         console.warn("Telegram chat id lookup failed", error);
-        return null;
+        return { ok: false, error: "CRM не смогла обратиться к /api/telegram" };
       }
+    }
+
+    async function checkTelegramBotStatus() {
+      try {
+        const response = await fetch("/api/telegram", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "checkBot" })
+        });
+        const payload = await response.json().catch(() => ({}));
+        return response.ok ? payload : { ok: false, ...payload };
+      } catch (error) {
+        return { ok: false, error: "CRM не смогла обратиться к /api/telegram" };
+      }
+    }
+
+    function telegramLookupError(result, user) {
+      const command = `/start ${user.login || user.email || user.id}`;
+      if (!result) return `Chat ID не найден. Попросите пользователя написать боту: ${command}`;
+      if (result.error?.includes("TELEGRAM_BOT_TOKEN")) return "В Vercel не настроена переменная TELEGRAM_BOT_TOKEN или после настройки не был сделан redeploy.";
+      const recent = (result.recentMessages || []).filter(item => item.text).map(item => `- ${item.text}`).join("\n");
+      return [
+        `Chat ID не найден.`,
+        `Пользователь должен открыть именно вашего бота и отправить: ${command}`,
+        `После этого нажмите “Найти ID” еще раз.`,
+        result.updatesChecked !== undefined ? `Проверено сообщений у бота: ${result.updatesChecked}` : "",
+        recent ? `Последние сообщения, которые видит бот:\n${recent}` : ""
+      ].filter(Boolean).join("\n\n");
     }
 
     function modelLine(model) {
@@ -2052,6 +2096,7 @@
           changeStatus(m, "Новая модель", "Черновик сохранен как новая модель");
           m.currentResponsibleUserId = m.ownerUserId;
           m.deadline = "";
+          notifyMovement(m, "Черновик сохранен как новая модель", [m.ownerUserId]);
           saveAndRender();
         },
         "send-constructor": () => {
@@ -2061,24 +2106,24 @@
           m.deadline = "";
           m.pattern.sentAt = today();
           replaceParticipantByRole(m, m.constructorUserId, "Конструктор");
-          notifyUser(m.constructorUserId, taskNotification(m, "Вам передана задача на разработку лекал"));
+          notifyMovement(m, "Вам передана задача на разработку лекал", [m.constructorUserId]);
           saveAndRender();
         },
         "take-pattern": () => askDeadline("Дата сдачи лекал", date => {
-          changeStatus(m, "Лекала в работе", "Конструктор взял лекала в работу"); m.deadline = date; m.pattern.acceptedAt = today(); m.pattern.deadline = date; notifyUser(m.ownerUserId, taskNotification(m, "Конструктор взял лекала в работу")); saveAndRender();
+          changeStatus(m, "Лекала в работе", "Конструктор взял лекала в работу"); m.deadline = date; m.pattern.acceptedAt = today(); m.pattern.deadline = date; notifyMovement(m, "Конструктор взял лекала в работу", [m.ownerUserId]); saveAndRender();
         }),
         "patterns-ready": () => checklistModal("Лекала готовы", checklistFields("pattern"), [{ id: "cost", label: "Стоимость за лекала", type: "number", required: true }], data => {
           m.pattern.checklist = pickChecklist(data); m.pattern.cost = Number(data.cost); m.pattern.readyAt = today();
-          m.payments.constructor[0].amount = Number(data.cost); changeStatus(m, "Лекала готовы", "Лекала готовы"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyUser(m.ownerUserId, taskNotification(m, "Лекала готовы, требуется действие владельца")); saveAndRender();
+          m.payments.constructor[0].amount = Number(data.cost); changeStatus(m, "Лекала готовы", "Лекала готовы"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, "Лекала готовы, требуется действие владельца", [m.ownerUserId]); saveAndRender();
         }),
         "send-workshop": () => formModal("Передать цеху", [{ id: "comment", label: `Комментарий для цеха к образцу ${m.samples.length + 1}`, type: "textarea", required: true }], data => {
           if (!m.workshopUserId) return alert("Выберите цех");
           const number = m.samples.length + 1;
           m.samples.push(sample(number, { status: `Отшив образца ${number}`, sentAt: today(), ownerComment: data.comment }));
-          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); notifyUser(m.workshopUserId, taskNotification(m, `Вам передан отшив образца ${number}`)); saveAndRender();
+          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); notifyMovement(m, `Вам передан отшив образца ${number}`, [m.workshopUserId]); saveAndRender();
         }),
         "take-sample": () => askDeadline(`Дата сдачи образца ${n}`, date => {
-          const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; changeStatus(m, s.status, `Цех взял в работу образец ${s.number}`); m.deadline = date; notifyUser(m.ownerUserId, taskNotification(m, `Цех взял в работу образец ${s.number}`)); saveAndRender();
+          const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; changeStatus(m, s.status, `Цех взял в работу образец ${s.number}`); m.deadline = date; notifyMovement(m, `Цех взял в работу образец ${s.number}`, [m.ownerUserId]); saveAndRender();
         }),
         "sample-ready": () => formModal(`Образец ${n} готов`, [
           { id: "comment", label: "Комментарий цеха", type: "textarea", required: true },
@@ -2087,20 +2132,20 @@
           { id: "cost", label: "Стоимость за образец", type: "number", required: true }
         ], data => {
           const s = currentSample(m); s.status = `Образец ${s.number} готов`; s.readyAt = today(); s.workshopComment = data.comment; s.fabricUsage = Number(data.fabric); s.usedHardware = data.hardware; s.cost = Number(data.cost);
-          changeStatus(m, s.status, `Образец ${s.number} готов`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyUser(m.ownerUserId, taskNotification(m, `Образец ${s.number} готов`)); saveAndRender();
+          changeStatus(m, s.status, `Образец ${s.number} готов`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, `Образец ${s.number} готов, требуется действие владельца`, [m.ownerUserId]); saveAndRender();
         }),
         "create-correction": () => formModal(`Подать корректировки ${m.corrections.length + 1}`, [
           { id: "text", label: "Текст корректировок", type: "textarea", required: true },
           { id: "link", label: "Ссылка на Google Drive с фото/видео", type: "text", required: false }
         ], data => {
           const number = m.corrections.length + 1; m.corrections.push(correction(number, { text: data.text, link: data.link }));
-          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyUser(m.constructorUserId, taskNotification(m, `Вам поданы корректировки ${number}`)); saveAndRender();
+          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyMovement(m, `Вам поданы корректировки ${number}`, [m.constructorUserId]); saveAndRender();
         }),
         "take-correction": () => askDeadline(`Дата сдачи корректировок ${n}`, date => {
-          const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; changeStatus(m, c.status, `Конструктор взял в работу корректировки ${c.number}`); m.deadline = date; notifyUser(m.ownerUserId, taskNotification(m, `Конструктор взял в работу корректировки ${c.number}`)); saveAndRender();
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; changeStatus(m, c.status, `Конструктор взял в работу корректировки ${c.number}`); m.deadline = date; notifyMovement(m, `Конструктор взял в работу корректировки ${c.number}`, [m.ownerUserId]); saveAndRender();
         }),
         "correction-ready": () => checklistModal(`Корректировки ${n} готовы`, checklistFields("correction"), [{ id: "printCost", label: "Сумма за печать", type: "number", required: true }], data => {
-          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); changeStatus(m, c.status, `Корректировки ${c.number} готовы`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyUser(m.ownerUserId, taskNotification(m, `Корректировки ${c.number} готовы`)); saveAndRender();
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); changeStatus(m, c.status, `Корректировки ${c.number} готовы`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, `Корректировки ${c.number} готовы, требуется действие владельца`, [m.ownerUserId]); saveAndRender();
         }),
         "send-grading": () => formModal("Подать на градацию", [
           { id: "finalName", label: "Финальное название модели", type: "text", required: true, value: m.title },
@@ -2108,10 +2153,10 @@
           { id: "comment", label: "Обновленный комментарий по градации", type: "textarea", required: true, value: m.gradingComment },
           { id: "extraComment", label: "Дополнительный комментарий", type: "textarea", required: true }
         ], data => {
-          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyUser(m.constructorUserId, taskNotification(m, "Вам передана градация")); saveAndRender();
+          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyMovement(m, "Вам передана градация", [m.constructorUserId]); saveAndRender();
         }),
         "take-grading": () => askDeadline("Дата готовности градации", date => {
-          changeStatus(m, "Градация в работе", "Конструктор взял градацию в работу"); m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; notifyUser(m.ownerUserId, taskNotification(m, "Конструктор взял градацию в работу")); saveAndRender();
+          changeStatus(m, "Градация в работе", "Конструктор взял градацию в работу"); m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; notifyMovement(m, "Конструктор взял градацию в работу", [m.ownerUserId]); saveAndRender();
         }),
         "grading-ready": () => checklistModal("Градация готова", [
           { id: "notches", label: "Проставлены все надсечки" },
@@ -2120,9 +2165,9 @@
           { id: "sentTelegram", label: "Файл лекал отправлен в Telegram с артикулом и названием" }
         ], [{ id: "cost", label: "Стоимость за градацию", type: "number", required: true }], data => {
           m.grading.checklist = { notches: true, printDetails: true, nameUpdated: true, sentTelegram: true }; m.grading.cost = Number(data.cost); m.grading.readyAt = today();
-          m.payments.constructor[1].amount = Number(data.cost); changeStatus(m, "Градация готова", "Градация готова"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyUser(m.ownerUserId, taskNotification(m, "Градация готова")); saveAndRender();
+          m.payments.constructor[1].amount = Number(data.cost); changeStatus(m, "Градация готова", "Градация готова"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, "Градация готова, требуется действие владельца", [m.ownerUserId]); saveAndRender();
         }),
-        "finish-model": () => { changeStatus(m, "Завершено", "Модель завершена"); m.deadline = ""; notifyUsers(m.participants, `Модель завершена\nМодель: ${modelLine(m)}`); saveAndRender(); }
+        "finish-model": () => { changeStatus(m, "Завершено", "Модель завершена"); m.deadline = ""; notifyUsers([...m.participants, ...adminUserIds()], `Модель завершена\nМодель: ${modelLine(m)}`); saveAndRender(); }
       };
       actions[action]?.();
     }
@@ -2268,6 +2313,7 @@
       m.deadline = document.getElementById("adminDeadline").value;
       if (oldResponsible !== userName(m.currentResponsibleUserId)) addHistory(m, "Админ изменил ответственного", { from: oldResponsible, to: userName(m.currentResponsibleUserId) });
       if (oldDeadline !== m.deadline) addHistory(m, "Админ изменил дедлайн", { from: oldDeadline, to: m.deadline });
+      notifyMovement(m, "Админ изменил статус/ответственного", [m.currentResponsibleUserId, m.ownerUserId]);
       persist();
       render();
     }
@@ -2282,6 +2328,7 @@
         changeStatus(m, "Удалено из разработки", `Модель удалена из разработки. Причина: ${data.reason}`);
         m.deletedReason = data.reason;
         m.deadline = "";
+        notifyMovement(m, `Модель удалена из разработки. Причина: ${data.reason}`, m.participants);
         persist();
         render();
       });
