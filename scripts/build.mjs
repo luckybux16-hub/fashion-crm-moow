@@ -2,9 +2,10 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
 const html = await readFile("index.html", "utf8");
 const hosting = await readFile(".openai/hosting.json", "utf8");
+const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || "";
 const resolvedHtml = html
   .replaceAll("__SUPABASE_URL__", process.env.SUPABASE_URL || "")
-  .replaceAll("__SUPABASE_ANON_KEY__", process.env.SUPABASE_ANON_KEY || "");
+  .replaceAll("__SUPABASE_ANON_KEY__", supabaseKey);
 
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist/server", { recursive: true });
