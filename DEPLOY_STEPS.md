@@ -10,26 +10,18 @@
    - anon public key
 
 The current schema is intentionally simple for the prototype: one shared JSON document in `crm_state`.
-For production access control, add Supabase Auth and stricter RLS policies later.
 
-## Step 1.1. Supabase Auth users
+## Step 1.1. CRM-managed access
 
-Create these users in Supabase Authentication -> Users:
+This CRM uses access records created inside CRM -> Доступы.
 
-- `admin@fashion-crm.local` / `admin`
-- `owner@fashion-crm.local` / `owner`
-- `workshop@fashion-crm.local` / `workshop`
-- `constructor@fashion-crm.local` / `constructor`
+When adding a new person:
 
-After these users can log in, run `supabase/auth-schema.sql` to restrict CRM data to authenticated users only.
+1. Add them in CRM -> Доступы.
+2. Set login/email, password, role, and active status there.
+3. They can immediately log in with those credentials.
 
-When adding a new person later:
-
-1. Add them in CRM -> Доступы with the right role and email.
-2. Add the same email in Supabase Authentication -> Users.
-3. Set their Supabase password there.
-
-The CRM role record and Supabase Auth user are separate on purpose.
+Do not run `supabase/auth-schema.sql` for this mode. If it was already run, run `supabase/crm-managed-auth-schema.sql` to restore CRM-managed access.
 
 ## Step 2. Configure Vercel
 

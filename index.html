@@ -330,8 +330,6 @@
       url: "__SUPABASE_URL__",
       anonKey: "__SUPABASE_ANON_KEY__"
     };
-    const authStoreKey = "fashion-crm-auth-session-v1";
-    let authSession = loadAuthSession();
     let remoteReady = false;
     let remoteError = "";
     let remoteSaveTimer = null;
@@ -470,25 +468,10 @@
       return supabaseConfig.url.startsWith("http") && supabaseConfig.anonKey && !supabaseConfig.anonKey.includes("__");
     }
 
-    function loadAuthSession() {
-      try { return JSON.parse(localStorage.getItem(authStoreKey)) || null; }
-      catch { return null; }
-    }
-
-    function saveAuthSession(session) {
-      authSession = session;
-      if (session) localStorage.setItem(authStoreKey, JSON.stringify(session));
-      else localStorage.removeItem(authStoreKey);
-    }
-
-    function authToken() {
-      return authSession?.access_token || supabaseConfig.anonKey;
-    }
-
     async function supabaseRequest(path, options = {}) {
       const headers = {
         apikey: supabaseConfig.anonKey,
-        authorization: `Bearer ${authToken()}`,
+        authorization: `Bearer ${supabaseConfig.anonKey}`,
         "content-type": "application/json",
         ...(options.headers || {})
       };
@@ -499,26 +482,8 @@
       return text ? JSON.parse(text) : null;
     }
 
-    async function supabaseAuthRequest(path, options = {}) {
-      const headers = {
-        apikey: supabaseConfig.anonKey,
-        "content-type": "application/json",
-        ...(options.headers || {})
-      };
-      const response = await fetch(`${supabaseConfig.url.replace(/\/$/, "")}${path}`, { ...options, headers });
-      if (!response.ok) throw new Error(await response.text());
-      const text = await response.text();
-      return text ? JSON.parse(text) : null;
-    }
-
     async function initRemoteState() {
       if (!hasSupabase()) return;
-      if (!authSession?.access_token) {
-        remoteReady = false;
-        remoteError = "";
-        render();
-        return;
-      }
       try {
         const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data");
         if (Array.isArray(rows) && rows[0]?.data) {
@@ -682,7 +647,7 @@
       document.getElementById("sessionRole").textContent = user.role;
       document.getElementById("mainNav").innerHTML = `
         <span class="pill ${remoteReady ? "ok" : remoteError ? "danger" : ""}">${hasSupabase() ? (remoteReady ? "Онлайн база" : remoteError || "Подключение") : "Локальный режим"}</span>
-        ${hasSupabase() ? `<span class="pill ${authSession ? "ok" : "danger"}">${authSession ? "Supabase Auth" : "Нет Auth"}</span>` : ""}
+        ${hasSupabase() ? `<span class="pill ok">CRM доступ</span>` : ""}
         <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
         <button class="nav-btn ${state.view === "all" ? "active" : ""}" data-view="all">Все модели</button>
         ${canViewGlobalStats() ? `<button class="nav-btn ${state.view === "stats" ? "active" : ""}" data-view="stats">Статистика</button>` : ""}
@@ -698,7 +663,7 @@
 
     function renderLogin() {
       if (hasSupabase()) {
-        document.getElementById("quickLogins").innerHTML = `<div class="empty">Вход только через email и пароль Supabase Auth</div>`;
+        document.getElementById("quickLogins").innerHTML = `<div class="empty">Вход по доступу, созданному администратором в CRM</div>`;
         return;
       }
       document.getElementById("quickLogins").innerHTML = state.users.filter(u => u.active).map(u => `
@@ -1175,12 +1140,12 @@
       return `
         <section class="section">
           <h3>Доступы</h3>
-          ${hasSupabase() ? `<div class="mini-block"><span class="mini-title">Supabase Auth</span><p class="muted">Доступ в CRM назначает роль, но не создает пользователя для входа. Для нового email отдельно создайте пользователя в Supabase Authentication с таким же email и паролем.</p></div>` : ""}
+          ${hasSupabase() ? `<div class="mini-block"><span class="mini-title">CRM доступы</span><p class="muted">Созданный здесь пользователь сразу может входить в CRM по логину или email и паролю. Отдельно добавлять его в Supabase Authentication не нужно.</p></div>` : ""}
           <div class="access-row">
             ${field("newUserName", "Имя", "")}
             ${field("newUserLogin", "Логин", "")}
             ${field("newUserEmail", "Email для входа", "")}
-            ${field("newUserPassword", hasSupabase() ? "Пароль в Supabase Auth" : "Пароль", "")}
+            ${field("newUserPassword", "Пароль для входа", "")}
             <label><span>Роль</span><select id="newUserRole">${roles.map(r => `<option>${r}</option>`).join("")}</select></label>
             <span></span>
             <button class="primary" id="createUser">Создать</button>
@@ -1190,7 +1155,7 @@
               <label><span>Имя</span><input data-user="${u.id}" data-user-field="name" value="${escapeAttr(u.name)}"></label>
               <label><span>Логин</span><input data-user="${u.id}" data-user-field="login" value="${escapeAttr(u.login)}"></label>
               <label><span>Email для входа</span><input data-user="${u.id}" data-user-field="email" value="${escapeAttr(u.email || defaultEmailForLogin(u.login))}"></label>
-              <label><span>${hasSupabase() ? "Пароль в Supabase Auth" : "Пароль"}</span><input data-user="${u.id}" data-user-field="password" value="${escapeAttr(u.password)}"></label>
+              <label><span>Пароль для входа</span><input data-user="${u.id}" data-user-field="password" value="${escapeAttr(u.password)}"></label>
               <label><span>Роль</span><select data-user="${u.id}" data-user-field="role">${roles.map(r => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select></label>
               <label><span>Доступ</span><select data-user="${u.id}" data-user-field="active"><option value="true" ${u.active ? "selected" : ""}>Активен</option><option value="false" ${!u.active ? "selected" : ""}>Отключен</option></select></label>
               <button class="danger" data-delete-user="${u.id}" ${u.id === currentUser().id ? "disabled" : ""}>Удалить</button>
@@ -1314,7 +1279,7 @@
         const email = document.querySelector("[data-field='newUserEmail']").value.trim() || defaultEmailForLogin(login);
         const password = document.querySelector("[data-field='newUserPassword']").value.trim();
         const role = document.getElementById("newUserRole").value;
-        if (!name || !login || (!hasSupabase() && !password)) return;
+        if (!name || !login || !password) return;
         state.users.push({ id: uid(), name, login, email, password, role, active: true });
         persist();
         render();
@@ -1576,65 +1541,20 @@
       render();
     }
 
-    async function loginWithSupabase(login, password) {
-      const email = resolveLoginEmail(login);
-      const response = await supabaseAuthRequest("/auth/v1/token?grant_type=password", {
-        method: "POST",
-        body: JSON.stringify({ email, password })
-      });
-      saveAuthSession({
-        access_token: response.access_token,
-        refresh_token: response.refresh_token,
-        expires_at: Date.now() + Number(response.expires_in || 3600) * 1000,
-        user: response.user
-      });
-      const user = findCrmUser(login, email);
-      if (!user) throw new Error("Пользователь есть в Supabase, но ему не назначена роль в CRM");
-      loginAs(user.id);
-      await initRemoteState();
-      state.currentUserId = user.id;
-      state.view = "dashboard";
-      persist();
-      render();
-    }
-
-    function resolveLoginEmail(login) {
-      if (login.includes("@")) return login.toLowerCase();
-      const user = state.users.find(u => u.login === login);
-      return (user?.email || defaultEmailForLogin(login)).toLowerCase();
-    }
-
     function defaultEmailForLogin(login) {
       return `${String(login || "").trim().toLowerCase()}@fashion-crm.local`;
-    }
-
-    function findCrmUser(login, email) {
-      const cleanLogin = String(login || "").trim();
-      const cleanEmail = String(email || "").trim().toLowerCase();
-      return state.users.find(u => u.active && (u.login === cleanLogin || String(u.email || "").toLowerCase() === cleanEmail));
     }
 
     document.getElementById("loginButton").onclick = async () => {
       const login = document.getElementById("loginInput").value.trim();
       const password = document.getElementById("passwordInput").value;
       document.getElementById("loginError").textContent = "";
-      if (hasSupabase()) {
-        try {
-          await loginWithSupabase(login, password);
-          return;
-        } catch (error) {
-          console.warn("Supabase auth failed", error);
-          document.getElementById("loginError").textContent = "Supabase Auth не принял email или пароль. Проверьте, что такой пользователь создан в Supabase Authentication.";
-          return;
-        }
-      }
       const user = state.users.find(u => (u.login === login || u.email === login) && u.password === password && u.active);
       if (!user) return document.getElementById("loginError").textContent = "Доступ не найден или отключен";
-      saveAuthSession(null);
       loginAs(user.id);
     };
     document.getElementById("passwordInput").onkeydown = e => { if (e.key === "Enter") document.getElementById("loginButton").click(); };
-    document.getElementById("logoutButton").onclick = () => { saveAuthSession(null); state.currentUserId = ""; state.activeModelId = ""; persist(); render(); };
+    document.getElementById("logoutButton").onclick = () => { state.currentUserId = ""; state.activeModelId = ""; persist(); render(); };
 
     function modelPhotoThumb(m) {
       if (m.photoDataUrl) return `<img class="model-photo" src="${escapeAttr(m.photoDataUrl)}" data-photo-model="${escapeAttr(m.id)}" alt="Фото модели">`;
