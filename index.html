@@ -713,6 +713,12 @@
       return `<span class="pill status-badge ${statusClass(status)} ${extra}">${escapeHtml(status || "-")}</span>`;
     }
 
+    function patternNameUpdatedLabel(model) {
+      const name = model.grading?.finalName || model.title || "название модели";
+      const article = model.article || "артикул";
+      return `Название на лекалах обновлено на ${name}, ${article}`;
+    }
+
     function render() {
       renderShell();
       renderLogin();
@@ -1114,7 +1120,7 @@
           ${checksMiniBlock([
             ["Проставлены все надсечки", g.checklist.notches],
             ["Все детали есть в печати", g.checklist.printDetails],
-            ["Название на лекалах обновлено", g.checklist.nameUpdated],
+            [patternNameUpdatedLabel(m), g.checklist.nameUpdated],
             ["Файл лекал отправлен в Telegram с артикулом и названием", g.checklist.sentTelegram]
           ])}
         </section>
@@ -1640,7 +1646,7 @@
         "grading-ready": () => checklistModal("Градация готова", [
           { id: "notches", label: "Проставлены все надсечки" },
           { id: "printDetails", label: "Все детали есть в печати" },
-          { id: "nameUpdated", label: "Название на лекалах обновлено" },
+          { id: "nameUpdated", label: patternNameUpdatedLabel(m) },
           { id: "sentTelegram", label: "Файл лекал отправлен в Telegram с артикулом и названием" }
         ], [{ id: "cost", label: "Стоимость за градацию", type: "number", required: true }], data => {
           m.grading.checklist = { notches: true, printDetails: true, nameUpdated: true, sentTelegram: true }; m.grading.cost = Number(data.cost); m.grading.readyAt = today();
