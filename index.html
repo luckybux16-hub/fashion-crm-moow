@@ -249,7 +249,7 @@
     .table-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr auto; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .table-row.workshop-pay-row { grid-template-columns: 1.1fr .8fr .8fr 1.2fr 1fr auto; }
     .history-row { display: grid; grid-template-columns: 150px 1fr 160px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
-    .access-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
+    .access-row { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .modal-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(23, 31, 28, .45); display: grid; place-items: center; padding: 20px; }
     .modal { width: min(620px, 100%); background: #fff; border-radius: 8px; border: 1px solid var(--line); box-shadow: 0 26px 80px rgba(0,0,0,.22); padding: 18px; display: grid; gap: 14px; }
     .photo-modal {
@@ -297,7 +297,7 @@
         <h1>CRM моделей одежды</h1>
         <p class="muted">Локальная тестовая версия с ролями, Dashboard и полной карточкой модели.</p>
         <div class="grid">
-          <label><span>Логин</span><input id="loginInput" placeholder="admin"></label>
+          <label><span>Логин / email</span><input id="loginInput" placeholder="admin или admin@fashion-crm.local"></label>
           <label><span>Пароль</span><input id="passwordInput" type="password" placeholder="admin"></label>
         </div>
         <button class="primary" id="loginButton">Войти</button>
@@ -330,15 +330,17 @@
       url: "__SUPABASE_URL__",
       anonKey: "__SUPABASE_ANON_KEY__"
     };
+    const authStoreKey = "fashion-crm-auth-session-v1";
+    let authSession = loadAuthSession();
     let remoteReady = false;
     let remoteError = "";
     let remoteSaveTimer = null;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
     const users = [
-      { id: "u-admin", name: "Админ", login: "admin", password: "admin", role: "Админ", active: true },
-      { id: "u-owner", name: "Владелец / дизайнер", login: "owner", password: "owner", role: "Владелец бренда/Дизайнер", active: true },
-      { id: "u-workshop", name: "Цех", login: "workshop", password: "workshop", role: "Цех", active: true },
-      { id: "u-constructor", name: "Конструктор", login: "constructor", password: "constructor", role: "Конструктор", active: true }
+      { id: "u-admin", name: "Админ", login: "admin", email: "admin@fashion-crm.local", password: "admin", role: "Админ", active: true },
+      { id: "u-owner", name: "Владелец / дизайнер", login: "owner", email: "owner@fashion-crm.local", password: "owner", role: "Владелец бренда/Дизайнер", active: true },
+      { id: "u-workshop", name: "Цех", login: "workshop", email: "workshop@fashion-crm.local", password: "workshop", role: "Цех", active: true },
+      { id: "u-constructor", name: "Конструктор", login: "constructor", email: "constructor@fashion-crm.local", password: "constructor", role: "Конструктор", active: true }
     ];
     const baseTabs = ["Основная", "Комментарии", "Оплата конструктора", "Оплата и расход цеха", "История", "Статистика"];
     const statusList = [
@@ -442,6 +444,7 @@
     function normalizeStateData(data) {
       data.statsPeriod = data.statsPeriod || "month";
       data.allResponsibleFilter = data.allResponsibleFilter || "";
+      (data.users || []).forEach(user => user.email = user.email || defaultEmailForLogin(user.login));
       (data.models || []).forEach(model => {
         model.brand = model.brand || "Не определились";
         model.photoDataUrl = model.photoDataUrl || "";
@@ -467,10 +470,25 @@
       return supabaseConfig.url.startsWith("http") && supabaseConfig.anonKey && !supabaseConfig.anonKey.includes("__");
     }
 
+    function loadAuthSession() {
+      try { return JSON.parse(localStorage.getItem(authStoreKey)) || null; }
+      catch { return null; }
+    }
+
+    function saveAuthSession(session) {
+      authSession = session;
+      if (session) localStorage.setItem(authStoreKey, JSON.stringify(session));
+      else localStorage.removeItem(authStoreKey);
+    }
+
+    function authToken() {
+      return authSession?.access_token || supabaseConfig.anonKey;
+    }
+
     async function supabaseRequest(path, options = {}) {
       const headers = {
         apikey: supabaseConfig.anonKey,
-        authorization: `Bearer ${supabaseConfig.anonKey}`,
+        authorization: `Bearer ${authToken()}`,
         "content-type": "application/json",
         ...(options.headers || {})
       };
@@ -486,7 +504,7 @@
       try {
         const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data");
         if (Array.isArray(rows) && rows[0]?.data) {
-          state = normalizeStateData(rows[0].data);
+          state = normalizeStateData({ ...structuredClone(seed), ...rows[0].data, ...localUiState() });
           localStorage.setItem(storeKey, JSON.stringify(state));
         }
         remoteReady = true;
@@ -523,8 +541,27 @@
       await supabaseRequest("/rest/v1/crm_state?on_conflict=id", {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify({ id: "main", data: state, updated_at: new Date().toISOString() })
+        body: JSON.stringify({ id: "main", data: sharedState(), updated_at: new Date().toISOString() })
       });
+    }
+
+    function localUiState() {
+      return {
+        currentUserId: state.currentUserId,
+        view: state.view,
+        allFilter: state.allFilter,
+        allResponsibleFilter: state.allResponsibleFilter,
+        statsPeriod: state.statsPeriod,
+        activeModelId: state.activeModelId,
+        activeTab: state.activeTab
+      };
+    }
+
+    function sharedState() {
+      return {
+        users: state.users,
+        models: state.models
+      };
     }
 
     persist();
@@ -627,6 +664,7 @@
       document.getElementById("sessionRole").textContent = user.role;
       document.getElementById("mainNav").innerHTML = `
         <span class="pill ${remoteReady ? "ok" : remoteError ? "danger" : ""}">${hasSupabase() ? (remoteReady ? "Онлайн база" : remoteError || "Подключение") : "Локальный режим"}</span>
+        ${hasSupabase() ? `<span class="pill ${authSession ? "ok" : "warn"}">${authSession ? "Supabase Auth" : "Тестовый вход"}</span>` : ""}
         <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
         <button class="nav-btn ${state.view === "all" ? "active" : ""}" data-view="all">Все модели</button>
         ${canViewGlobalStats() ? `<button class="nav-btn ${state.view === "stats" ? "active" : ""}" data-view="stats">Статистика</button>` : ""}
@@ -644,7 +682,7 @@
       document.getElementById("quickLogins").innerHTML = state.users.filter(u => u.active).map(u => `
         <button class="quick-login" data-login="${u.id}">
           <strong>${escapeHtml(u.role)}</strong>
-          <span class="muted">${escapeHtml(u.login)} / ${escapeHtml(u.password)}</span>
+          <span class="muted">${escapeHtml(u.email || u.login)} / ${escapeHtml(u.password)}</span>
         </button>
       `).join("");
       document.querySelectorAll("[data-login]").forEach(btn => btn.onclick = () => loginAs(btn.dataset.login));
@@ -1118,6 +1156,7 @@
           <div class="access-row">
             ${field("newUserName", "Имя", "")}
             ${field("newUserLogin", "Логин", "")}
+            ${field("newUserEmail", "Email для входа", "")}
             ${field("newUserPassword", "Пароль", "")}
             <label><span>Роль</span><select id="newUserRole">${roles.map(r => `<option>${r}</option>`).join("")}</select></label>
             <span></span>
@@ -1127,6 +1166,7 @@
             <div class="access-row">
               <label><span>Имя</span><input data-user="${u.id}" data-user-field="name" value="${escapeAttr(u.name)}"></label>
               <label><span>Логин</span><input data-user="${u.id}" data-user-field="login" value="${escapeAttr(u.login)}"></label>
+              <label><span>Email для входа</span><input data-user="${u.id}" data-user-field="email" value="${escapeAttr(u.email || defaultEmailForLogin(u.login))}"></label>
               <label><span>Пароль</span><input data-user="${u.id}" data-user-field="password" value="${escapeAttr(u.password)}"></label>
               <label><span>Роль</span><select data-user="${u.id}" data-user-field="role">${roles.map(r => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select></label>
               <label><span>Доступ</span><select data-user="${u.id}" data-user-field="active"><option value="true" ${u.active ? "selected" : ""}>Активен</option><option value="false" ${!u.active ? "selected" : ""}>Отключен</option></select></label>
@@ -1248,10 +1288,11 @@
       if (create) create.onclick = () => {
         const name = document.querySelector("[data-field='newUserName']").value.trim();
         const login = document.querySelector("[data-field='newUserLogin']").value.trim();
+        const email = document.querySelector("[data-field='newUserEmail']").value.trim() || defaultEmailForLogin(login);
         const password = document.querySelector("[data-field='newUserPassword']").value.trim();
         const role = document.getElementById("newUserRole").value;
         if (!name || !login || !password) return;
-        state.users.push({ id: uid(), name, login, password, role, active: true });
+        state.users.push({ id: uid(), name, login, email, password, role, active: true });
         persist();
         render();
       };
@@ -1512,15 +1553,63 @@
       render();
     }
 
-    document.getElementById("loginButton").onclick = () => {
+    async function loginWithSupabase(login, password) {
+      const email = resolveLoginEmail(login);
+      const response = await supabaseRequest("/auth/v1/token?grant_type=password", {
+        method: "POST",
+        body: JSON.stringify({ email, password })
+      });
+      saveAuthSession({
+        access_token: response.access_token,
+        refresh_token: response.refresh_token,
+        expires_at: Date.now() + Number(response.expires_in || 3600) * 1000,
+        user: response.user
+      });
+      const user = findCrmUser(login, email);
+      if (!user) throw new Error("Пользователь есть в Supabase, но ему не назначена роль в CRM");
+      loginAs(user.id);
+      await initRemoteState();
+      state.currentUserId = user.id;
+      state.view = "dashboard";
+      persist();
+      render();
+    }
+
+    function resolveLoginEmail(login) {
+      if (login.includes("@")) return login.toLowerCase();
+      const user = state.users.find(u => u.login === login);
+      return (user?.email || defaultEmailForLogin(login)).toLowerCase();
+    }
+
+    function defaultEmailForLogin(login) {
+      return `${String(login || "").trim().toLowerCase()}@fashion-crm.local`;
+    }
+
+    function findCrmUser(login, email) {
+      const cleanLogin = String(login || "").trim();
+      const cleanEmail = String(email || "").trim().toLowerCase();
+      return state.users.find(u => u.active && (u.login === cleanLogin || String(u.email || "").toLowerCase() === cleanEmail));
+    }
+
+    document.getElementById("loginButton").onclick = async () => {
       const login = document.getElementById("loginInput").value.trim();
       const password = document.getElementById("passwordInput").value;
-      const user = state.users.find(u => u.login === login && u.password === password && u.active);
+      document.getElementById("loginError").textContent = "";
+      if (hasSupabase()) {
+        try {
+          await loginWithSupabase(login, password);
+          return;
+        } catch (error) {
+          console.warn("Supabase auth failed, trying test login", error);
+        }
+      }
+      const user = state.users.find(u => (u.login === login || u.email === login) && u.password === password && u.active);
       if (!user) return document.getElementById("loginError").textContent = "Доступ не найден или отключен";
+      saveAuthSession(null);
       loginAs(user.id);
     };
     document.getElementById("passwordInput").onkeydown = e => { if (e.key === "Enter") document.getElementById("loginButton").click(); };
-    document.getElementById("logoutButton").onclick = () => { state.currentUserId = ""; state.activeModelId = ""; persist(); render(); };
+    document.getElementById("logoutButton").onclick = () => { saveAuthSession(null); state.currentUserId = ""; state.activeModelId = ""; persist(); render(); };
 
     function modelPhotoThumb(m) {
       if (m.photoDataUrl) return `<img class="model-photo" src="${escapeAttr(m.photoDataUrl)}" data-photo-model="${escapeAttr(m.id)}" alt="Фото модели">`;

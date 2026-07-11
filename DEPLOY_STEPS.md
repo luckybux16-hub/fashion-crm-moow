@@ -12,6 +12,17 @@
 The current schema is intentionally simple for the prototype: one shared JSON document in `crm_state`.
 For production access control, add Supabase Auth and stricter RLS policies later.
 
+## Step 1.1. Supabase Auth users
+
+Create these users in Supabase Authentication -> Users:
+
+- `admin@fashion-crm.local` / `admin`
+- `owner@fashion-crm.local` / `owner`
+- `workshop@fashion-crm.local` / `workshop`
+- `constructor@fashion-crm.local` / `constructor`
+
+After these users can log in, run `supabase/auth-schema.sql` to restrict CRM data to authenticated users only.
+
 ## Step 2. Configure Vercel
 
 Add environment variables:
