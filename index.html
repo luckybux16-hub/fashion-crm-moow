@@ -286,7 +286,7 @@
     .table-row.workshop-pay-row { grid-template-columns: 1.1fr .8fr .8fr 1.2fr 1fr auto; }
     .history-row { display: grid; grid-template-columns: 150px 1fr 160px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .history-row small { display: block; color: var(--muted); font-size: 12px; font-weight: 650; margin-top: 4px; overflow-wrap: anywhere; }
-    .access-row { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
+    .access-row { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .modal-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(23, 31, 28, .45); display: grid; place-items: center; padding: 20px; }
     .modal { width: min(620px, 100%); background: #fff; border-radius: 8px; border: 1px solid var(--line); box-shadow: 0 26px 80px rgba(0,0,0,.22); padding: 18px; display: grid; gap: 14px; }
     .photo-modal {
@@ -679,7 +679,11 @@
       data.cloudBackupError = data.cloudBackupError || "";
       data.syncConflict = !!data.syncConflict;
       data.loginEvents = data.loginEvents || [];
-      (data.users || []).forEach(user => user.email = user.email || defaultEmailForLogin(user.login));
+      (data.users || []).forEach(user => {
+        user.email = user.email || defaultEmailForLogin(user.login);
+        user.telegramChatId = user.telegramChatId || "";
+        user.telegramEnabled = !!user.telegramEnabled;
+      });
       (data.models || []).forEach(model => {
         model.brand = model.brand || "Не определились";
         model.photoDataUrl = model.photoDataUrl || "";
@@ -1576,7 +1580,8 @@
             ${field("newUserEmail", "Email для входа", "")}
             ${field("newUserPassword", "Пароль для входа", "")}
             <label><span>Роль</span><select id="newUserRole">${roles.map(r => `<option>${r}</option>`).join("")}</select></label>
-            <span></span>
+            ${field("newUserTelegram", "Telegram chat ID", "")}
+            <label><span>Telegram</span><select id="newUserTelegramEnabled"><option value="false">Выкл</option><option value="true">Вкл</option></select></label>
             <button class="primary" id="createUser">Создать</button>
           </div>
           ${usersForEdit.map(u => `
@@ -1587,7 +1592,9 @@
               <label><span>Пароль для входа</span><input data-user="${u.id}" data-user-field="password" value="${escapeAttr(u.password)}"></label>
               <label><span>Роль</span><select data-user="${u.id}" data-user-field="role">${roles.map(r => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select></label>
               <label><span>Доступ</span><select data-user="${u.id}" data-user-field="active"><option value="true" ${u.active ? "selected" : ""}>Активен</option><option value="false" ${!u.active ? "selected" : ""}>Отключен</option></select></label>
-              <button class="danger" data-delete-user="${u.id}" ${u.id === currentUser().id ? "disabled" : ""}>Удалить</button>
+              <label><span>Telegram chat ID</span><input data-user="${u.id}" data-user-field="telegramChatId" value="${escapeAttr(u.telegramChatId || "")}"></label>
+              <label><span>Telegram</span><select data-user="${u.id}" data-user-field="telegramEnabled"><option value="true" ${u.telegramEnabled ? "selected" : ""}>Вкл</option><option value="false" ${!u.telegramEnabled ? "selected" : ""}>Выкл</option></select></label>
+              <div class="actions"><button data-test-telegram="${u.id}">Тест</button><button class="danger" data-delete-user="${u.id}" ${u.id === currentUser().id ? "disabled" : ""}>Удалить</button></div>
             </div>
           `).join("")}
           <div class="actions">
@@ -1785,7 +1792,7 @@
         el.onchange = el.oninput = () => {
           const user = accessDraft.find(u => u.id === el.dataset.user);
           if (!user) return;
-          user[el.dataset.userField] = el.dataset.userField === "active" ? el.value === "true" : el.value;
+          user[el.dataset.userField] = ["active", "telegramEnabled"].includes(el.dataset.userField) ? el.value === "true" : el.value;
         };
       });
       const create = document.getElementById("createUser");
@@ -1795,8 +1802,10 @@
         const email = document.querySelector("[data-field='newUserEmail']").value.trim() || defaultEmailForLogin(login);
         const password = document.querySelector("[data-field='newUserPassword']").value.trim();
         const role = document.getElementById("newUserRole").value;
+        const telegramChatId = document.querySelector("[data-field='newUserTelegram']").value.trim();
+        const telegramEnabled = document.getElementById("newUserTelegramEnabled").value === "true";
         if (!name || !login || !password) return;
-        accessDraft.push({ id: uid(), name, login, email, password, role, active: true });
+        accessDraft.push({ id: uid(), name, login, email, password, role, active: true, telegramChatId, telegramEnabled });
         render();
       };
       document.querySelectorAll("[data-delete-user]").forEach(btn => btn.onclick = () => {
@@ -1817,11 +1826,18 @@
         accessDraft = structuredClone(state.users);
         render();
       };
+      document.querySelectorAll("[data-test-telegram]").forEach(btn => btn.onclick = () => {
+        const user = accessDraft.find(u => u.id === btn.dataset.testTelegram);
+        if (!user) return;
+        sendTelegramToUser(user, "Тестовое уведомление CRM: Telegram подключен.").then(ok => {
+          alert(ok ? "Тестовое уведомление отправлено" : "Не удалось отправить. Проверьте chat ID, TELEGRAM_BOT_TOKEN и что пользователь написал боту /start.");
+        });
+      });
       bindBackupControls();
     }
 
     function normalizeUsers(usersList) {
-      return usersList.map(user => ({ ...user, email: user.email || defaultEmailForLogin(user.login), active: !!user.active }));
+      return usersList.map(user => ({ ...user, email: user.email || defaultEmailForLogin(user.login), active: !!user.active, telegramChatId: user.telegramChatId || "", telegramEnabled: !!user.telegramEnabled }));
     }
 
     function addAccessHistory(before, after) {
@@ -1831,7 +1847,7 @@
       after.forEach(user => {
         const old = beforeById[user.id];
         if (!old) return addHistory(adminModel, `Создан доступ: ${user.name}`, { from: "-", to: user.role });
-        ["name", "login", "email", "role", "active"].forEach(field => {
+        ["name", "login", "email", "role", "active", "telegramChatId", "telegramEnabled"].forEach(field => {
           if (String(old[field]) !== String(user[field])) addHistory(adminModel, `Изменен доступ: ${user.name}`, { field: labelForUserField(field), from: String(old[field] ?? "-"), to: String(user[field] ?? "-") });
         });
       });
@@ -1841,7 +1857,39 @@
     }
 
     function labelForUserField(field) {
-      return ({ name: "Имя", login: "Логин", email: "Email", role: "Роль", active: "Доступ" })[field] || field;
+      return ({ name: "Имя", login: "Логин", email: "Email", role: "Роль", active: "Доступ", telegramChatId: "Telegram chat ID", telegramEnabled: "Telegram уведомления" })[field] || field;
+    }
+
+    async function sendTelegramToUser(userId, message) {
+      const user = typeof userId === "object" ? userId : state.users.find(u => u.id === userId);
+      if (!user?.telegramEnabled || !user.telegramChatId) return false;
+      try {
+        const response = await fetch("/api/telegram", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chatId: user.telegramChatId, text: message })
+        });
+        return response.ok;
+      } catch (error) {
+        console.warn("Telegram notification failed", error);
+        return false;
+      }
+    }
+
+    function notifyUser(userId, message) {
+      sendTelegramToUser(userId, message).catch(error => console.warn("Telegram notification failed", error));
+    }
+
+    function notifyUsers(userIds, message) {
+      [...new Set(userIds.filter(Boolean))].forEach(userId => notifyUser(userId, message));
+    }
+
+    function modelLine(model) {
+      return `${model.title || "Без названия"}${model.article ? ` · ${model.article}` : ""}`;
+    }
+
+    function taskNotification(model, title) {
+      return `${title}\nМодель: ${modelLine(model)}\nСтатус: ${model.status}\nДедлайн: ${model.deadline || "не задан"}`;
     }
 
     function bindBackupControls() {
@@ -1979,23 +2027,24 @@
           m.deadline = "";
           m.pattern.sentAt = today();
           replaceParticipantByRole(m, m.constructorUserId, "Конструктор");
+          notifyUser(m.constructorUserId, taskNotification(m, "Вам передана задача на разработку лекал"));
           saveAndRender();
         },
         "take-pattern": () => askDeadline("Дата сдачи лекал", date => {
-          changeStatus(m, "Лекала в работе", "Конструктор взял лекала в работу"); m.deadline = date; m.pattern.acceptedAt = today(); m.pattern.deadline = date; saveAndRender();
+          changeStatus(m, "Лекала в работе", "Конструктор взял лекала в работу"); m.deadline = date; m.pattern.acceptedAt = today(); m.pattern.deadline = date; notifyUser(m.ownerUserId, taskNotification(m, "Конструктор взял лекала в работу")); saveAndRender();
         }),
         "patterns-ready": () => checklistModal("Лекала готовы", checklistFields("pattern"), [{ id: "cost", label: "Стоимость за лекала", type: "number", required: true }], data => {
           m.pattern.checklist = pickChecklist(data); m.pattern.cost = Number(data.cost); m.pattern.readyAt = today();
-          m.payments.constructor[0].amount = Number(data.cost); changeStatus(m, "Лекала готовы", "Лекала готовы"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; saveAndRender();
+          m.payments.constructor[0].amount = Number(data.cost); changeStatus(m, "Лекала готовы", "Лекала готовы"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyUser(m.ownerUserId, taskNotification(m, "Лекала готовы, требуется действие владельца")); saveAndRender();
         }),
         "send-workshop": () => formModal("Передать цеху", [{ id: "comment", label: `Комментарий для цеха к образцу ${m.samples.length + 1}`, type: "textarea", required: true }], data => {
           if (!m.workshopUserId) return alert("Выберите цех");
           const number = m.samples.length + 1;
           m.samples.push(sample(number, { status: `Отшив образца ${number}`, sentAt: today(), ownerComment: data.comment }));
-          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); saveAndRender();
+          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); notifyUser(m.workshopUserId, taskNotification(m, `Вам передан отшив образца ${number}`)); saveAndRender();
         }),
         "take-sample": () => askDeadline(`Дата сдачи образца ${n}`, date => {
-          const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; changeStatus(m, s.status, `Цех взял в работу образец ${s.number}`); m.deadline = date; saveAndRender();
+          const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; changeStatus(m, s.status, `Цех взял в работу образец ${s.number}`); m.deadline = date; notifyUser(m.ownerUserId, taskNotification(m, `Цех взял в работу образец ${s.number}`)); saveAndRender();
         }),
         "sample-ready": () => formModal(`Образец ${n} готов`, [
           { id: "comment", label: "Комментарий цеха", type: "textarea", required: true },
@@ -2004,20 +2053,20 @@
           { id: "cost", label: "Стоимость за образец", type: "number", required: true }
         ], data => {
           const s = currentSample(m); s.status = `Образец ${s.number} готов`; s.readyAt = today(); s.workshopComment = data.comment; s.fabricUsage = Number(data.fabric); s.usedHardware = data.hardware; s.cost = Number(data.cost);
-          changeStatus(m, s.status, `Образец ${s.number} готов`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; saveAndRender();
+          changeStatus(m, s.status, `Образец ${s.number} готов`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyUser(m.ownerUserId, taskNotification(m, `Образец ${s.number} готов`)); saveAndRender();
         }),
         "create-correction": () => formModal(`Подать корректировки ${m.corrections.length + 1}`, [
           { id: "text", label: "Текст корректировок", type: "textarea", required: true },
           { id: "link", label: "Ссылка на Google Drive с фото/видео", type: "text", required: false }
         ], data => {
           const number = m.corrections.length + 1; m.corrections.push(correction(number, { text: data.text, link: data.link }));
-          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; saveAndRender();
+          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyUser(m.constructorUserId, taskNotification(m, `Вам поданы корректировки ${number}`)); saveAndRender();
         }),
         "take-correction": () => askDeadline(`Дата сдачи корректировок ${n}`, date => {
-          const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; changeStatus(m, c.status, `Конструктор взял в работу корректировки ${c.number}`); m.deadline = date; saveAndRender();
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; changeStatus(m, c.status, `Конструктор взял в работу корректировки ${c.number}`); m.deadline = date; notifyUser(m.ownerUserId, taskNotification(m, `Конструктор взял в работу корректировки ${c.number}`)); saveAndRender();
         }),
         "correction-ready": () => checklistModal(`Корректировки ${n} готовы`, checklistFields("correction"), [{ id: "printCost", label: "Сумма за печать", type: "number", required: true }], data => {
-          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); changeStatus(m, c.status, `Корректировки ${c.number} готовы`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; saveAndRender();
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); changeStatus(m, c.status, `Корректировки ${c.number} готовы`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyUser(m.ownerUserId, taskNotification(m, `Корректировки ${c.number} готовы`)); saveAndRender();
         }),
         "send-grading": () => formModal("Подать на градацию", [
           { id: "finalName", label: "Финальное название модели", type: "text", required: true, value: m.title },
@@ -2025,10 +2074,10 @@
           { id: "comment", label: "Обновленный комментарий по градации", type: "textarea", required: true, value: m.gradingComment },
           { id: "extraComment", label: "Дополнительный комментарий", type: "textarea", required: true }
         ], data => {
-          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; saveAndRender();
+          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyUser(m.constructorUserId, taskNotification(m, "Вам передана градация")); saveAndRender();
         }),
         "take-grading": () => askDeadline("Дата готовности градации", date => {
-          changeStatus(m, "Градация в работе", "Конструктор взял градацию в работу"); m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; saveAndRender();
+          changeStatus(m, "Градация в работе", "Конструктор взял градацию в работу"); m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; notifyUser(m.ownerUserId, taskNotification(m, "Конструктор взял градацию в работу")); saveAndRender();
         }),
         "grading-ready": () => checklistModal("Градация готова", [
           { id: "notches", label: "Проставлены все надсечки" },
@@ -2037,9 +2086,9 @@
           { id: "sentTelegram", label: "Файл лекал отправлен в Telegram с артикулом и названием" }
         ], [{ id: "cost", label: "Стоимость за градацию", type: "number", required: true }], data => {
           m.grading.checklist = { notches: true, printDetails: true, nameUpdated: true, sentTelegram: true }; m.grading.cost = Number(data.cost); m.grading.readyAt = today();
-          m.payments.constructor[1].amount = Number(data.cost); changeStatus(m, "Градация готова", "Градация готова"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; saveAndRender();
+          m.payments.constructor[1].amount = Number(data.cost); changeStatus(m, "Градация готова", "Градация готова"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyUser(m.ownerUserId, taskNotification(m, "Градация готова")); saveAndRender();
         }),
-        "finish-model": () => { changeStatus(m, "Завершено", "Модель завершена"); m.deadline = ""; saveAndRender(); }
+        "finish-model": () => { changeStatus(m, "Завершено", "Модель завершена"); m.deadline = ""; notifyUsers(m.participants, `Модель завершена\nМодель: ${modelLine(m)}`); saveAndRender(); }
       };
       actions[action]?.();
     }
@@ -2117,6 +2166,7 @@
       const notify = [...new Set([...m.participants, ...state.users.filter(u => u.role === "Админ").map(u => u.id)])].filter(id => id !== currentUser().id);
       notify.forEach(id => m.unread[id] = Number(m.unread[id] || 0) + 1);
       addHistory(m, "Добавлен комментарий");
+      notifyUsers(notify, `Новый комментарий в CRM\nМодель: ${modelLine(m)}\nАвтор: ${currentUser().name}\n${text}`);
       persist();
       render();
     }

@@ -29,6 +29,7 @@ Add environment variables:
 
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
+- `TELEGRAM_BOT_TOKEN` (optional, for Telegram notifications)
 
 Build command:
 
@@ -48,3 +49,12 @@ dist
 2. Import the repository in Vercel.
 3. Add the environment variables above.
 4. Deploy.
+
+## Step 4. Telegram notifications
+
+1. Create a bot in Telegram via `@BotFather`.
+2. Copy the bot token to Vercel -> Project -> Settings -> Environment Variables as `TELEGRAM_BOT_TOKEN`.
+3. Each CRM user must open the bot and send `/start`.
+4. Add that user's Telegram chat ID in CRM -> Доступы.
+5. Set Telegram notifications to `Вкл`.
+6. Use the `Тест` button in CRM -> Доступы to verify delivery.
