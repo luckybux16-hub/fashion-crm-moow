@@ -22,7 +22,7 @@
     }
 
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; }
+    body { margin: 0; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
     button, input, textarea, select { font: inherit; }
     button {
       border: 1px solid var(--line);
@@ -157,6 +157,7 @@
       font-size: 12px;
       font-weight: 700;
       white-space: nowrap;
+      max-width: 100%;
     }
     .pill.danger { color: var(--danger); border-color: rgba(183,71,66,.35); }
     .pill.ok { color: var(--ok); border-color: rgba(45,133,80,.35); }
@@ -283,10 +284,130 @@
       .primary-layout { grid-template-columns: 1fr; }
       .photo-preview { max-width: 280px; }
       .primary-row { grid-template-columns: 1fr; }
-      .date-row { grid-template-columns: 1fr; }
+      .date-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .span-2, .span-3, .span-4 { grid-column: auto; }
       .session-bar, .toolbar { align-items: stretch; flex-direction: column; }
       .detail-head { top: 0; }
+    }
+
+    @media (max-width: 720px) {
+      h1 { font-size: 25px; }
+      h2 { font-size: 21px; }
+      h3 { font-size: 15px; }
+      button, .file-button { width: 100%; min-height: 42px; }
+      .login-screen { padding: 12px; place-items: start center; }
+      .login-card, .quick-logins { grid-template-columns: 1fr; }
+      .panel, .section { padding: 14px; gap: 12px; }
+      .workspace { padding: 12px; gap: 12px; }
+      .session-bar {
+        position: static;
+        padding: 10px 12px;
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .session-bar .row,
+      .main-nav,
+      .statusline,
+      .tabs,
+      .actions,
+      .filters {
+        align-items: stretch;
+        flex-wrap: wrap;
+      }
+      .main-nav button,
+      .tabs button,
+      .filters button {
+        width: auto;
+        flex: 1 1 auto;
+      }
+      .detail-head {
+        position: static;
+        padding: 12px;
+        gap: 10px;
+      }
+      .detail-head .toolbar > div:first-child { display: grid; gap: 6px; }
+      .detail-head .actions button,
+      .modal .actions button { width: 100%; }
+      .statusline .pill,
+      .tabs .tab {
+        white-space: normal;
+        justify-content: center;
+        text-align: center;
+      }
+      .card-grid { gap: 10px; }
+      .model-card {
+        grid-template-columns: 92px minmax(0, 1fr);
+        gap: 8px 10px;
+        min-height: auto;
+        padding: 12px;
+      }
+      .model-card .model-photo,
+      .model-card .model-photo-placeholder {
+        grid-row: span 6;
+        width: 92px;
+      }
+      .model-card strong,
+      .model-card .row,
+      .model-card .status-badge,
+      .model-card .muted,
+      .model-card > .pill {
+        min-width: 0;
+      }
+      .model-card .row {
+        flex-wrap: wrap;
+        align-items: flex-start;
+      }
+      .model-card .pill {
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      .primary-photo-block {
+        justify-items: center;
+      }
+      .photo-preview,
+      .primary-photo-block .model-photo-placeholder {
+        width: min(220px, 100%);
+      }
+      .date-row { grid-template-columns: 1fr; }
+      .date-item { min-height: 52px; }
+      .check-row .pill {
+        width: 100%;
+        white-space: normal;
+        align-items: flex-start;
+        border-radius: 8px;
+      }
+      .table-row,
+      .history-row,
+      .access-row {
+        gap: 8px;
+        padding: 10px;
+      }
+      .table-row button,
+      .access-row button { width: 100%; }
+      .stat { min-height: 72px; padding: 12px; }
+      .stat strong { font-size: 22px; }
+      .modal-backdrop {
+        align-items: end;
+        padding: 8px;
+      }
+      .modal {
+        width: 100%;
+        max-height: calc(100vh - 16px);
+        overflow: auto;
+        padding: 14px;
+      }
+      .photo-modal { width: 100vw; height: 100vh; }
+    }
+
+    @media (max-width: 420px) {
+      .model-card {
+        grid-template-columns: 76px minmax(0, 1fr);
+      }
+      .model-card .model-photo,
+      .model-card .model-photo-placeholder {
+        width: 76px;
+      }
+      .pill { font-size: 11px; }
     }
   </style>
 </head>
