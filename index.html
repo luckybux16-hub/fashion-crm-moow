@@ -682,7 +682,7 @@
       document.getElementById("sessionRole").textContent = user.role;
       document.getElementById("mainNav").innerHTML = `
         <span class="pill ${remoteReady ? "ok" : remoteError ? "danger" : ""}">${hasSupabase() ? (remoteReady ? "Онлайн база" : remoteError || "Подключение") : "Локальный режим"}</span>
-        ${hasSupabase() ? `<span class="pill ${authSession ? "ok" : "warn"}">${authSession ? "Supabase Auth" : "Тестовый вход"}</span>` : ""}
+        ${hasSupabase() ? `<span class="pill ${authSession ? "ok" : "danger"}">${authSession ? "Supabase Auth" : "Нет Auth"}</span>` : ""}
         <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
         <button class="nav-btn ${state.view === "all" ? "active" : ""}" data-view="all">Все модели</button>
         ${canViewGlobalStats() ? `<button class="nav-btn ${state.view === "stats" ? "active" : ""}" data-view="stats">Статистика</button>` : ""}
@@ -697,6 +697,10 @@
     }
 
     function renderLogin() {
+      if (hasSupabase()) {
+        document.getElementById("quickLogins").innerHTML = `<div class="empty">Вход только через email и пароль Supabase Auth</div>`;
+        return;
+      }
       document.getElementById("quickLogins").innerHTML = state.users.filter(u => u.active).map(u => `
         <button class="quick-login" data-login="${u.id}">
           <strong>${escapeHtml(u.role)}</strong>
@@ -1619,10 +1623,8 @@
           return;
         } catch (error) {
           console.warn("Supabase auth failed", error);
-          if (login.includes("@")) {
-            document.getElementById("loginError").textContent = "Supabase Auth не принял email или пароль";
-            return;
-          }
+          document.getElementById("loginError").textContent = "Supabase Auth не принял email или пароль";
+          return;
         }
       }
       const user = state.users.find(u => (u.login === login || u.email === login) && u.password === password && u.active);
