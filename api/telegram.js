@@ -9,7 +9,39 @@ export default async function handler(request, response) {
   }
 
   try {
-    const { chatId, text } = request.body || {};
+    const { action, chatId, text, login, email } = request.body || {};
+
+    if (action === "findChatId") {
+      const needleValues = [login, email].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
+      if (!needleValues.length) {
+        return response.status(400).json({ error: "login or email is required" });
+      }
+
+      const updatesResponse = await fetch(`https://api.telegram.org/bot${token}/getUpdates?limit=100&allowed_updates=${encodeURIComponent(JSON.stringify(["message"]))}`);
+      const updatesPayload = await updatesResponse.json();
+      if (!updatesResponse.ok) {
+        return response.status(updatesResponse.status).json({ error: updatesPayload.description || "Telegram error" });
+      }
+
+      const updates = Array.isArray(updatesPayload.result) ? updatesPayload.result.slice().reverse() : [];
+      const match = updates.find(update => {
+        const message = update.message;
+        const messageText = String(message?.text || "").trim().toLowerCase();
+        return message?.chat?.id && needleValues.some(value => messageText === `/start ${value}` || messageText.includes(value));
+      });
+
+      if (!match) {
+        return response.status(404).json({ error: "chat id not found" });
+      }
+
+      return response.status(200).json({
+        ok: true,
+        chatId: String(match.message.chat.id),
+        name: [match.message.chat.first_name, match.message.chat.last_name].filter(Boolean).join(" "),
+        username: match.message.chat.username || ""
+      });
+    }
+
     const safeChatId = String(chatId || "").trim();
     const safeText = String(text || "").trim().slice(0, 3500);
 

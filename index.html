@@ -1584,6 +1584,10 @@
             <label><span>Telegram</span><select id="newUserTelegramEnabled"><option value="false">Выкл</option><option value="true">Вкл</option></select></label>
             <button class="primary" id="createUser">Создать</button>
           </div>
+          <div class="mini-block">
+            <span class="mini-title">Как подключить Telegram</span>
+            <p class="muted">Пользователь открывает вашего бота, пишет команду <strong>/start логин</strong>, затем админ нажимает “Найти ID” в строке этого пользователя. После этого включите Telegram и сохраните доступы.</p>
+          </div>
           ${usersForEdit.map(u => `
             <div class="access-row">
               <label><span>Имя</span><input data-user="${u.id}" data-user-field="name" value="${escapeAttr(u.name)}"></label>
@@ -1594,7 +1598,11 @@
               <label><span>Доступ</span><select data-user="${u.id}" data-user-field="active"><option value="true" ${u.active ? "selected" : ""}>Активен</option><option value="false" ${!u.active ? "selected" : ""}>Отключен</option></select></label>
               <label><span>Telegram chat ID</span><input data-user="${u.id}" data-user-field="telegramChatId" value="${escapeAttr(u.telegramChatId || "")}"></label>
               <label><span>Telegram</span><select data-user="${u.id}" data-user-field="telegramEnabled"><option value="true" ${u.telegramEnabled ? "selected" : ""}>Вкл</option><option value="false" ${!u.telegramEnabled ? "selected" : ""}>Выкл</option></select></label>
-              <div class="actions"><button data-test-telegram="${u.id}">Тест</button><button class="danger" data-delete-user="${u.id}" ${u.id === currentUser().id ? "disabled" : ""}>Удалить</button></div>
+              <div class="actions"><button data-find-telegram="${u.id}">Найти ID</button><button data-test-telegram="${u.id}">Тест</button><button class="danger" data-delete-user="${u.id}" ${u.id === currentUser().id ? "disabled" : ""}>Удалить</button></div>
+            </div>
+            <div class="mini-block">
+              <span class="mini-title">${escapeHtml(u.name)} · команда для бота</span>
+              <p><strong>/start ${escapeHtml(u.login || u.email || u.id)}</strong></p>
             </div>
           `).join("")}
           <div class="actions">
@@ -1833,6 +1841,17 @@
           alert(ok ? "Тестовое уведомление отправлено" : "Не удалось отправить. Проверьте chat ID, TELEGRAM_BOT_TOKEN и что пользователь написал боту /start.");
         });
       });
+      document.querySelectorAll("[data-find-telegram]").forEach(btn => btn.onclick = () => {
+        const user = accessDraft.find(u => u.id === btn.dataset.findTelegram);
+        if (!user) return;
+        findTelegramChatId(user).then(result => {
+          if (!result?.chatId) return alert(`Chat ID не найден. Попросите пользователя написать боту: /start ${user.login || user.email}`);
+          user.telegramChatId = result.chatId;
+          user.telegramEnabled = true;
+          render();
+          alert(`Chat ID найден: ${result.chatId}. Нажмите “Сохранить доступы”.`);
+        });
+      });
       bindBackupControls();
     }
 
@@ -1882,6 +1901,21 @@
 
     function notifyUsers(userIds, message) {
       [...new Set(userIds.filter(Boolean))].forEach(userId => notifyUser(userId, message));
+    }
+
+    async function findTelegramChatId(user) {
+      try {
+        const response = await fetch("/api/telegram", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "findChatId", login: user.login, email: user.email })
+        });
+        if (!response.ok) return null;
+        return await response.json();
+      } catch (error) {
+        console.warn("Telegram chat id lookup failed", error);
+        return null;
+      }
     }
 
     function modelLine(model) {
