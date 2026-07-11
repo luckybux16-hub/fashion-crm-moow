@@ -520,13 +520,11 @@
         <h2>Вход</h2>
         <p class="muted">Зайдите под своим доступом, чтобы увидеть только свои задачи и модели.</p>
         <div class="grid">
-          <label><span>Логин / email</span><input id="loginInput" placeholder="admin или admin@fashion-crm.local"></label>
-          <label><span>Пароль</span><input id="passwordInput" type="password" placeholder="admin"></label>
+          <label><span>Логин / email</span><input id="loginInput"></label>
+          <label><span>Пароль</span><input id="passwordInput" type="password"></label>
         </div>
         <button class="primary" id="loginButton">Войти</button>
         <span class="muted" id="loginError"></span>
-        <h3>Тестовые входы</h3>
-        <div class="quick-logins" id="quickLogins"></div>
       </section>
     </div>
   </div>
@@ -1040,13 +1038,15 @@
     }
 
     function renderLogin() {
+      const quickLogins = document.getElementById("quickLogins");
+      if (!quickLogins) return;
       if (hasSupabase()) {
-        document.getElementById("quickLogins").innerHTML = `
+        quickLogins.innerHTML = `
           <div class="empty">Вход по доступу, созданному администратором в CRM</div>
         `;
         return;
       }
-      document.getElementById("quickLogins").innerHTML = state.users.filter(u => u.active).map(u => `
+      quickLogins.innerHTML = state.users.filter(u => u.active).map(u => `
         <button class="quick-login" data-login="${u.id}">
           <strong>${escapeHtml(u.role)}</strong>
           <span class="muted">${escapeHtml(u.email || u.login)} / ${escapeHtml(u.password)}</span>
