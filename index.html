@@ -250,6 +250,7 @@
     .table-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr auto; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .table-row.workshop-pay-row { grid-template-columns: 1.1fr .8fr .8fr 1.2fr 1fr auto; }
     .history-row { display: grid; grid-template-columns: 150px 1fr 160px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
+    .history-row small { display: block; color: var(--muted); font-size: 12px; font-weight: 650; margin-top: 4px; overflow-wrap: anywhere; }
     .access-row { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .modal-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(23, 31, 28, .45); display: grid; place-items: center; padding: 20px; }
     .modal { width: min(620px, 100%); background: #fff; border-radius: 8px; border: 1px solid var(--line); box-shadow: 0 26px 80px rgba(0,0,0,.22); padding: 18px; display: grid; gap: 14px; }
@@ -278,6 +279,7 @@
       background: rgba(255,255,255,.92);
     }
     .empty { padding: 28px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); text-align: center; background: rgba(255,255,255,.55); }
+    .sync-warning { border-color: rgba(183,71,66,.35); background: #fff0ee; color: #7e2722; }
 
     @media (max-width: 980px) {
       .login-card, .grid, .grid.three, .grid.four, .stat-grid, .card-grid, .table-row, .table-row.workshop-pay-row, .history-row, .access-row, .pay-summary { grid-template-columns: 1fr; }
@@ -456,8 +458,10 @@
     let remoteLoaded = false;
     let remoteError = "";
     let remoteSaveTimer = null;
+    let remoteUpdatedAt = "";
     let lastCloudBackupAt = 0;
     let cloudBackupsRequested = false;
+    let accessDraft = null;
     const cloudBackupIntervalMs = 120000;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
     const users = [
@@ -487,6 +491,8 @@
       activeTab: "Основная",
       cloudBackups: [],
       cloudBackupError: "",
+      syncConflict: false,
+      loginEvents: [],
       users,
       models: [
         makeModel({ id: "m-draft", title: "Платье-комбинация", article: "DR-014", status: "Черновик", responsible: "u-owner", deadline: addDays(3), samples: [], corrections: [], unread: { "u-owner": 1 } }),
@@ -573,6 +579,8 @@
       data.allResponsibleFilter = data.allResponsibleFilter || "";
       data.cloudBackups = data.cloudBackups || [];
       data.cloudBackupError = data.cloudBackupError || "";
+      data.syncConflict = !!data.syncConflict;
+      data.loginEvents = data.loginEvents || [];
       (data.users || []).forEach(user => user.email = user.email || defaultEmailForLogin(user.login));
       (data.models || []).forEach(model => {
         model.brand = model.brand || "Не определились";
@@ -620,6 +628,7 @@
         if (Array.isArray(rows) && rows[0]?.data) {
           backupSharedState(preRemoteBackupKey, "Локальная копия до загрузки Supabase");
           state = normalizeStateData({ ...structuredClone(seed), ...rows[0].data, ...localUiState() });
+          remoteUpdatedAt = rows[0].updated_at || "";
           localStorage.setItem(storeKey, JSON.stringify(state));
         } else {
           await saveRemoteNow();
@@ -627,6 +636,7 @@
         remoteReady = true;
         remoteLoaded = true;
         remoteError = "";
+        state.syncConflict = false;
         render();
       } catch (error) {
         remoteReady = false;
@@ -647,7 +657,7 @@
       remoteSaveTimer = setTimeout(() => {
         saveRemoteNow().catch(error => {
           remoteReady = false;
-          remoteError = "Не сохранено в Supabase";
+          remoteError = state.syncConflict ? "Есть новая версия в Supabase" : "Не сохранено в Supabase";
           console.warn("Supabase save failed", error);
           render();
         });
@@ -656,13 +666,44 @@
 
     async function saveRemoteNow() {
       if (!hasSupabase()) return;
+      await ensureNoRemoteConflict();
       backupSharedState(`${storeKey}-last-cloud-save`, "Копия перед записью в Supabase");
       await createCloudBackup("Автокопия перед записью в Supabase").catch(error => console.warn("Cloud backup failed", error));
-      await supabaseRequest("/rest/v1/crm_state?on_conflict=id", {
+      const rows = await supabaseRequest("/rest/v1/crm_state?on_conflict=id&select=updated_at", {
         method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        headers: { Prefer: "resolution=merge-duplicates,return=representation" },
         body: JSON.stringify({ id: "main", data: sharedState(), updated_at: new Date().toISOString() })
       });
+      remoteUpdatedAt = Array.isArray(rows) ? rows[0]?.updated_at || remoteUpdatedAt : remoteUpdatedAt;
+      remoteReady = true;
+      remoteLoaded = true;
+      state.syncConflict = false;
+      localStorage.setItem(storeKey, JSON.stringify(state));
+    }
+
+    async function ensureNoRemoteConflict() {
+      if (!remoteUpdatedAt) return;
+      const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=updated_at");
+      const currentUpdatedAt = Array.isArray(rows) ? rows[0]?.updated_at || "" : "";
+      if (currentUpdatedAt && currentUpdatedAt !== remoteUpdatedAt) {
+        state.syncConflict = true;
+        localStorage.setItem(storeKey, JSON.stringify(state));
+        throw new Error("Remote state changed in another browser");
+      }
+    }
+
+    async function loadLatestRemoteState() {
+      if (!hasSupabase()) return;
+      const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data,updated_at");
+      if (!Array.isArray(rows) || !rows[0]?.data) return;
+      backupSharedState(preRemoteBackupKey, "Локальная копия до ручной загрузки Supabase");
+      state = normalizeStateData({ ...structuredClone(seed), ...rows[0].data, ...localUiState(), syncConflict: false });
+      remoteUpdatedAt = rows[0].updated_at || "";
+      remoteReady = true;
+      remoteLoaded = true;
+      remoteError = "";
+      localStorage.setItem(storeKey, JSON.stringify(state));
+      render();
     }
 
     async function createCloudBackup(reason, options = {}) {
@@ -718,14 +759,16 @@
         activeModelId: state.activeModelId,
         activeTab: state.activeTab,
         cloudBackups: state.cloudBackups,
-        cloudBackupError: state.cloudBackupError
+        cloudBackupError: state.cloudBackupError,
+        syncConflict: state.syncConflict
       };
     }
 
     function sharedState() {
       return {
         users: state.users,
-        models: state.models
+        models: state.models,
+        loginEvents: state.loginEvents
       };
     }
 
@@ -748,7 +791,7 @@
 
     function applySharedData(data) {
       if (!data?.users || !data?.models) return false;
-      state = normalizeStateData({ ...state, users: data.users, models: data.models });
+      state = normalizeStateData({ ...state, users: data.users, models: data.models, loginEvents: data.loginEvents || state.loginEvents || [] });
       persist();
       return true;
     }
@@ -782,6 +825,7 @@
         if (!hasAccess(m)) return false;
         if (state.allResponsibleFilter && m.currentResponsibleUserId !== state.allResponsibleFilter) return false;
         if (state.allFilter === "process") return inProcess(m);
+        if (state.allFilter === "archive") return !inProcess(m);
         return true;
       });
     }
@@ -791,9 +835,20 @@
       if (role === "Цех") return ["Основная", "Комментарии", "Оплата и расход цеха"];
       return baseTabs;
     }
-    function addHistory(model, action) {
-      model.history.unshift({ date: nowText(), user: currentUser()?.name || "Система", action });
+    function addHistory(model, action, details = null) {
+      model.history.unshift({ date: nowText(), user: currentUser()?.name || "Система", action, details });
       model.updatedAt = today();
+    }
+    function changeStatus(model, nextStatus, action) {
+      const previousStatus = model.status;
+      model.status = nextStatus;
+      addHistory(model, action, previousStatus !== nextStatus ? { from: previousStatus, to: nextStatus } : null);
+    }
+    function historyDetails(details) {
+      if (!details) return "";
+      if (details.field) return `<small>${escapeHtml(details.field)}: ${escapeHtml(details.from || "-")} → ${escapeHtml(details.to || "-")}</small>`;
+      if ("from" in details || "to" in details) return `<small>${escapeHtml(details.from || "-")} → ${escapeHtml(details.to || "-")}</small>`;
+      return "";
     }
     function addParticipant(model, userId) {
       if (userId && !model.participants.includes(userId)) model.participants.push(userId);
@@ -860,6 +915,7 @@
       document.getElementById("mainNav").innerHTML = `
         <span class="pill ${remoteReady ? "ok" : remoteError ? "danger" : ""}">${hasSupabase() ? (remoteReady ? "Онлайн база" : remoteError || "Подключение") : "Локальный режим"}</span>
         ${hasSupabase() ? `<span class="pill ok">CRM доступ</span>` : ""}
+        ${state.syncConflict ? `<button class="danger" id="loadLatestRemote">Загрузить новую версию</button>` : ""}
         <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
         <button class="nav-btn ${state.view === "all" ? "active" : ""}" data-view="all">Все модели</button>
         ${canViewGlobalStats() ? `<button class="nav-btn ${state.view === "stats" ? "active" : ""}" data-view="stats">Статистика</button>` : ""}
@@ -871,6 +927,14 @@
         persist();
         render();
       });
+      const latest = document.getElementById("loadLatestRemote");
+      if (latest) latest.onclick = () => {
+        if (!confirm("В Supabase есть более новая версия. Загрузить ее? Текущие несохраненные изменения останутся только в локальной резервной копии.")) return;
+        loadLatestRemoteState().catch(error => {
+          console.warn(error);
+          alert("Не удалось загрузить новую версию");
+        });
+      };
     }
 
     function renderLogin() {
@@ -902,6 +966,7 @@
       const overdue = mine.filter(m => deadlineState(m.deadline).cls === "danger").length;
       return `
         <section class="panel">
+          ${state.syncConflict ? `<div class="mini-block sync-warning"><span class="mini-title">Данные изменились в другой вкладке</span><p>Сохранение остановлено, чтобы не перезаписать чужие изменения. Нажмите “Загрузить новую версию” сверху.</p></div>` : ""}
           <div class="toolbar">
             <div>
               <h2>Dashboard</h2>
@@ -933,6 +998,7 @@
             </div>
             <div class="filters">
               <button class="${state.allFilter === "process" ? "dark" : ""}" data-filter="process">В процессе</button>
+              <button class="${state.allFilter === "archive" ? "dark" : ""}" data-filter="archive">Архив</button>
               <button class="${state.allFilter === "all" ? "dark" : ""}" data-filter="all">Все</button>
               <select id="responsibleFilter">
                 <option value="">Все ответственные</option>
@@ -998,6 +1064,7 @@
           </div>
         </section>
         ${accessTab()}
+        ${loginEventsTab()}
         ${backupTab()}
       `;
     }
@@ -1326,7 +1393,7 @@
       return `
         <section class="section">
           <h3>История</h3>
-          ${history.map(h => `<div class="history-row"><span class="muted">${escapeHtml(h.date)}</span><strong>${escapeHtml(h.action)}</strong><span class="muted">${escapeHtml(h.user)}</span></div>`).join("")}
+          ${history.map(h => `<div class="history-row"><span class="muted">${escapeHtml(h.date)}</span><strong>${escapeHtml(h.action)}${historyDetails(h.details)}</strong><span class="muted">${escapeHtml(h.user)}</span></div>`).join("")}
         </section>
       `;
     }
@@ -1352,6 +1419,8 @@
     }
 
     function accessTab() {
+      if (!accessDraft) accessDraft = structuredClone(state.users);
+      const usersForEdit = accessDraft;
       return `
         <section class="section">
           <h3>Доступы</h3>
@@ -1365,7 +1434,7 @@
             <span></span>
             <button class="primary" id="createUser">Создать</button>
           </div>
-          ${state.users.map(u => `
+          ${usersForEdit.map(u => `
             <div class="access-row">
               <label><span>Имя</span><input data-user="${u.id}" data-user-field="name" value="${escapeAttr(u.name)}"></label>
               <label><span>Логин</span><input data-user="${u.id}" data-user-field="login" value="${escapeAttr(u.login)}"></label>
@@ -1376,6 +1445,26 @@
               <button class="danger" data-delete-user="${u.id}" ${u.id === currentUser().id ? "disabled" : ""}>Удалить</button>
             </div>
           `).join("")}
+          <div class="actions">
+            <button class="primary" id="saveAccessChanges">Сохранить доступы</button>
+            <button id="cancelAccessChanges">Отменить изменения</button>
+          </div>
+        </section>
+      `;
+    }
+
+    function loginEventsTab() {
+      const events = (state.loginEvents || []).slice(0, 40);
+      return `
+        <section class="section">
+          <h3>Журнал входов</h3>
+          ${events.map(event => `
+            <div class="history-row">
+              <span class="muted">${escapeHtml(formatDateTime(event.at))}</span>
+              <strong>${escapeHtml(event.userName || "-")} · ${escapeHtml(event.role || "-")}</strong>
+              <span class="muted">${escapeHtml(event.login || "-")}</span>
+            </div>
+          `).join("") || `<div class="empty">Входов пока нет</div>`}
         </section>
       `;
     }
@@ -1519,7 +1608,7 @@
           const changed = el.value !== initialValue;
           updateValue();
           if (changed) {
-            addHistory(currentModel(), `Изменено поле "${labelFor(key)}"`);
+            addHistory(currentModel(), `Изменено поле "${labelFor(key)}"`, { field: labelFor(key), from: initialValue, to: el.value });
             initialValue = el.value;
             persist();
           }
@@ -1549,11 +1638,9 @@
       }
       document.querySelectorAll("[data-user-field]").forEach(el => {
         el.onchange = el.oninput = () => {
-          const user = state.users.find(u => u.id === el.dataset.user);
+          const user = accessDraft.find(u => u.id === el.dataset.user);
           if (!user) return;
           user[el.dataset.userField] = el.dataset.userField === "active" ? el.value === "true" : el.value;
-          persist();
-          renderShell();
         };
       });
       const create = document.getElementById("createUser");
@@ -1564,16 +1651,52 @@
         const password = document.querySelector("[data-field='newUserPassword']").value.trim();
         const role = document.getElementById("newUserRole").value;
         if (!name || !login || !password) return;
-        state.users.push({ id: uid(), name, login, email, password, role, active: true });
-        persist();
+        accessDraft.push({ id: uid(), name, login, email, password, role, active: true });
         render();
       };
       document.querySelectorAll("[data-delete-user]").forEach(btn => btn.onclick = () => {
-        state.users = state.users.filter(u => u.id !== btn.dataset.deleteUser);
-        persist();
+        accessDraft = accessDraft.filter(u => u.id !== btn.dataset.deleteUser);
         render();
       });
+      const saveAccess = document.getElementById("saveAccessChanges");
+      if (saveAccess) saveAccess.onclick = () => {
+        const before = structuredClone(state.users);
+        state.users = normalizeUsers(accessDraft);
+        accessDraft = structuredClone(state.users);
+        addAccessHistory(before, state.users);
+        persist();
+        render();
+      };
+      const cancelAccess = document.getElementById("cancelAccessChanges");
+      if (cancelAccess) cancelAccess.onclick = () => {
+        accessDraft = structuredClone(state.users);
+        render();
+      };
       bindBackupControls();
+    }
+
+    function normalizeUsers(usersList) {
+      return usersList.map(user => ({ ...user, email: user.email || defaultEmailForLogin(user.login), active: !!user.active }));
+    }
+
+    function addAccessHistory(before, after) {
+      const adminModel = state.models[0];
+      if (!adminModel) return;
+      const beforeById = Object.fromEntries(before.map(user => [user.id, user]));
+      after.forEach(user => {
+        const old = beforeById[user.id];
+        if (!old) return addHistory(adminModel, `Создан доступ: ${user.name}`, { from: "-", to: user.role });
+        ["name", "login", "email", "role", "active"].forEach(field => {
+          if (String(old[field]) !== String(user[field])) addHistory(adminModel, `Изменен доступ: ${user.name}`, { field: labelForUserField(field), from: String(old[field] ?? "-"), to: String(user[field] ?? "-") });
+        });
+      });
+      before.forEach(user => {
+        if (!after.find(item => item.id === user.id)) addHistory(adminModel, `Удален доступ: ${user.name}`, { from: user.role, to: "-" });
+      });
+    }
+
+    function labelForUserField(field) {
+      return ({ name: "Имя", login: "Логин", email: "Email", role: "Роль", active: "Доступ" })[field] || field;
     }
 
     function bindBackupControls() {
@@ -1699,37 +1822,35 @@
       const n = getCurrentNumber(m);
       const actions = {
         "make-new": () => {
-          m.status = "Новая модель";
+          changeStatus(m, "Новая модель", "Черновик сохранен как новая модель");
           m.currentResponsibleUserId = m.ownerUserId;
           m.deadline = "";
-          addHistory(m, "Черновик сохранен как новая модель");
           saveAndRender();
         },
         "send-constructor": () => {
           if (!m.constructorUserId) return alert("Выберите конструктора");
-          m.status = "Разработка лекал";
+          changeStatus(m, "Разработка лекал", "Задача передана конструктору");
           m.currentResponsibleUserId = m.constructorUserId;
           m.deadline = "";
           m.pattern.sentAt = today();
           replaceParticipantByRole(m, m.constructorUserId, "Конструктор");
-          addHistory(m, "Задача передана конструктору");
           saveAndRender();
         },
         "take-pattern": () => askDeadline("Дата сдачи лекал", date => {
-          m.status = "Лекала в работе"; m.deadline = date; m.pattern.acceptedAt = today(); m.pattern.deadline = date; addHistory(m, "Конструктор взял лекала в работу"); saveAndRender();
+          changeStatus(m, "Лекала в работе", "Конструктор взял лекала в работу"); m.deadline = date; m.pattern.acceptedAt = today(); m.pattern.deadline = date; saveAndRender();
         }),
         "patterns-ready": () => checklistModal("Лекала готовы", checklistFields("pattern"), [{ id: "cost", label: "Стоимость за лекала", type: "number", required: true }], data => {
           m.pattern.checklist = pickChecklist(data); m.pattern.cost = Number(data.cost); m.pattern.readyAt = today();
-          m.payments.constructor[0].amount = Number(data.cost); m.status = "Лекала готовы"; m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; addHistory(m, "Лекала готовы"); saveAndRender();
+          m.payments.constructor[0].amount = Number(data.cost); changeStatus(m, "Лекала готовы", "Лекала готовы"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; saveAndRender();
         }),
         "send-workshop": () => formModal("Передать цеху", [{ id: "comment", label: `Комментарий для цеха к образцу ${m.samples.length + 1}`, type: "textarea", required: true }], data => {
           if (!m.workshopUserId) return alert("Выберите цех");
           const number = m.samples.length + 1;
           m.samples.push(sample(number, { status: `Отшив образца ${number}`, sentAt: today(), ownerComment: data.comment }));
-          m.status = `Отшив образца ${number}`; m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); addHistory(m, `Передано в цех на отшив образца ${number}`); saveAndRender();
+          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); saveAndRender();
         }),
         "take-sample": () => askDeadline(`Дата сдачи образца ${n}`, date => {
-          const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; m.status = s.status; m.deadline = date; addHistory(m, `Цех взял в работу образец ${s.number}`); saveAndRender();
+          const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; changeStatus(m, s.status, `Цех взял в работу образец ${s.number}`); m.deadline = date; saveAndRender();
         }),
         "sample-ready": () => formModal(`Образец ${n} готов`, [
           { id: "comment", label: "Комментарий цеха", type: "textarea", required: true },
@@ -1738,20 +1859,20 @@
           { id: "cost", label: "Стоимость за образец", type: "number", required: true }
         ], data => {
           const s = currentSample(m); s.status = `Образец ${s.number} готов`; s.readyAt = today(); s.workshopComment = data.comment; s.fabricUsage = Number(data.fabric); s.usedHardware = data.hardware; s.cost = Number(data.cost);
-          m.status = s.status; m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; addHistory(m, `Образец ${s.number} готов`); saveAndRender();
+          changeStatus(m, s.status, `Образец ${s.number} готов`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; saveAndRender();
         }),
         "create-correction": () => formModal(`Подать корректировки ${m.corrections.length + 1}`, [
           { id: "text", label: "Текст корректировок", type: "textarea", required: true },
           { id: "link", label: "Ссылка на Google Drive с фото/видео", type: "text", required: false }
         ], data => {
           const number = m.corrections.length + 1; m.corrections.push(correction(number, { text: data.text, link: data.link }));
-          m.status = `Поданы корректировки ${number}`; m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; addHistory(m, `Поданы корректировки ${number}`); saveAndRender();
+          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; saveAndRender();
         }),
         "take-correction": () => askDeadline(`Дата сдачи корректировок ${n}`, date => {
-          const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; m.status = c.status; m.deadline = date; addHistory(m, `Конструктор взял в работу корректировки ${c.number}`); saveAndRender();
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; changeStatus(m, c.status, `Конструктор взял в работу корректировки ${c.number}`); m.deadline = date; saveAndRender();
         }),
         "correction-ready": () => checklistModal(`Корректировки ${n} готовы`, checklistFields("correction"), [{ id: "printCost", label: "Сумма за печать", type: "number", required: true }], data => {
-          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); m.status = c.status; m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; addHistory(m, `Корректировки ${c.number} готовы`); saveAndRender();
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); changeStatus(m, c.status, `Корректировки ${c.number} готовы`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; saveAndRender();
         }),
         "send-grading": () => formModal("Подать на градацию", [
           { id: "finalName", label: "Финальное название модели", type: "text", required: true, value: m.title },
@@ -1759,10 +1880,10 @@
           { id: "comment", label: "Обновленный комментарий по градации", type: "textarea", required: true, value: m.gradingComment },
           { id: "extraComment", label: "Дополнительный комментарий", type: "textarea", required: true }
         ], data => {
-          m.grading = { ...m.grading, ...data, sentAt: today() }; m.status = "Передано на градацию"; m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; addHistory(m, "Модель передана на градацию"); saveAndRender();
+          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; saveAndRender();
         }),
         "take-grading": () => askDeadline("Дата готовности градации", date => {
-          m.status = "Градация в работе"; m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; addHistory(m, "Конструктор взял градацию в работу"); saveAndRender();
+          changeStatus(m, "Градация в работе", "Конструктор взял градацию в работу"); m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; saveAndRender();
         }),
         "grading-ready": () => checklistModal("Градация готова", [
           { id: "notches", label: "Проставлены все надсечки" },
@@ -1771,9 +1892,9 @@
           { id: "sentTelegram", label: "Файл лекал отправлен в Telegram с артикулом и названием" }
         ], [{ id: "cost", label: "Стоимость за градацию", type: "number", required: true }], data => {
           m.grading.checklist = { notches: true, printDetails: true, nameUpdated: true, sentTelegram: true }; m.grading.cost = Number(data.cost); m.grading.readyAt = today();
-          m.payments.constructor[1].amount = Number(data.cost); m.status = "Градация готова"; m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; addHistory(m, "Градация готова"); saveAndRender();
+          m.payments.constructor[1].amount = Number(data.cost); changeStatus(m, "Градация готова", "Градация готова"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; saveAndRender();
         }),
-        "finish-model": () => { m.status = "Завершено"; m.deadline = ""; addHistory(m, "Модель завершена"); saveAndRender(); }
+        "finish-model": () => { changeStatus(m, "Завершено", "Модель завершена"); m.deadline = ""; saveAndRender(); }
       };
       actions[action]?.();
     }
@@ -1911,10 +2032,13 @@
 
     function adminSaveModel() {
       const m = currentModel();
-      m.status = document.getElementById("adminStatus").value;
+      const oldResponsible = userName(m.currentResponsibleUserId);
+      const oldDeadline = m.deadline;
+      changeStatus(m, document.getElementById("adminStatus").value, "Админ изменил статус");
       m.currentResponsibleUserId = document.getElementById("adminResponsible").value;
       m.deadline = document.getElementById("adminDeadline").value;
-      addHistory(m, "Админ изменил статус/ответственного");
+      if (oldResponsible !== userName(m.currentResponsibleUserId)) addHistory(m, "Админ изменил ответственного", { from: oldResponsible, to: userName(m.currentResponsibleUserId) });
+      if (oldDeadline !== m.deadline) addHistory(m, "Админ изменил дедлайн", { from: oldDeadline, to: m.deadline });
       persist();
       render();
     }
@@ -1926,10 +2050,9 @@
         { id: "confirm2", label: "Я подтверждаю удаление из активной разработки", type: "checkbox", required: true }
       ], data => {
         const m = currentModel();
-        m.status = "Удалено из разработки";
+        changeStatus(m, "Удалено из разработки", `Модель удалена из разработки. Причина: ${data.reason}`);
         m.deletedReason = data.reason;
         m.deadline = "";
-        addHistory(m, `Модель удалена из разработки. Причина: ${data.reason}`);
         persist();
         render();
       });
@@ -1940,8 +2063,23 @@
       if (!user) return;
       state.currentUserId = user.id;
       state.view = "dashboard";
+      recordLogin(user);
       persist();
       render();
+    }
+
+    function recordLogin(user) {
+      state.loginEvents = state.loginEvents || [];
+      state.loginEvents.unshift({
+        id: uid(),
+        userId: user.id,
+        userName: user.name,
+        role: user.role,
+        login: user.email || user.login,
+        at: new Date().toISOString(),
+        userAgent: navigator.userAgent
+      });
+      state.loginEvents = state.loginEvents.slice(0, 200);
     }
 
     function defaultEmailForLogin(login) {
