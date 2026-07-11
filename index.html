@@ -499,8 +499,26 @@
       return text ? JSON.parse(text) : null;
     }
 
+    async function supabaseAuthRequest(path, options = {}) {
+      const headers = {
+        apikey: supabaseConfig.anonKey,
+        "content-type": "application/json",
+        ...(options.headers || {})
+      };
+      const response = await fetch(`${supabaseConfig.url.replace(/\/$/, "")}${path}`, { ...options, headers });
+      if (!response.ok) throw new Error(await response.text());
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
+    }
+
     async function initRemoteState() {
       if (!hasSupabase()) return;
+      if (!authSession?.access_token) {
+        remoteReady = false;
+        remoteError = "";
+        render();
+        return;
+      }
       try {
         const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data");
         if (Array.isArray(rows) && rows[0]?.data) {
@@ -1555,7 +1573,7 @@
 
     async function loginWithSupabase(login, password) {
       const email = resolveLoginEmail(login);
-      const response = await supabaseRequest("/auth/v1/token?grant_type=password", {
+      const response = await supabaseAuthRequest("/auth/v1/token?grant_type=password", {
         method: "POST",
         body: JSON.stringify({ email, password })
       });
@@ -1600,7 +1618,11 @@
           await loginWithSupabase(login, password);
           return;
         } catch (error) {
-          console.warn("Supabase auth failed, trying test login", error);
+          console.warn("Supabase auth failed", error);
+          if (login.includes("@")) {
+            document.getElementById("loginError").textContent = "Supabase Auth не принял email или пароль";
+            return;
+          }
         }
       }
       const user = state.users.find(u => (u.login === login || u.email === login) && u.password === password && u.active);
