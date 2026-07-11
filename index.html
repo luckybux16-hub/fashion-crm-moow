@@ -326,11 +326,13 @@
 
   <script>
     const storeKey = "fashion-crm-local-v3";
+    const preRemoteBackupKey = `${storeKey}-before-supabase`;
     const supabaseConfig = {
       url: "__SUPABASE_URL__",
       anonKey: "__SUPABASE_ANON_KEY__"
     };
     let remoteReady = false;
+    let remoteLoaded = false;
     let remoteError = "";
     let remoteSaveTimer = null;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
@@ -348,6 +350,7 @@
     const today = () => new Date().toISOString().slice(0, 10);
     const addDays = days => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
     const nowText = () => new Date().toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+    const formatDateTime = value => value ? new Date(value).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }) : "-";
     const uid = () => Math.random().toString(36).slice(2, 10);
 
     const seed = {
@@ -485,17 +488,21 @@
     async function initRemoteState() {
       if (!hasSupabase()) return;
       try {
-        const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data");
+        const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data,updated_at");
         if (Array.isArray(rows) && rows[0]?.data) {
+          backupSharedState(preRemoteBackupKey, "Локальная копия до загрузки Supabase");
           state = normalizeStateData({ ...structuredClone(seed), ...rows[0].data, ...localUiState() });
           localStorage.setItem(storeKey, JSON.stringify(state));
+        } else {
+          await saveRemoteNow();
         }
         remoteReady = true;
+        remoteLoaded = true;
         remoteError = "";
-        await saveRemoteNow();
         render();
       } catch (error) {
         remoteReady = false;
+        remoteLoaded = false;
         remoteError = "Supabase недоступен";
         console.warn("Supabase sync failed", error);
         render();
@@ -504,7 +511,7 @@
 
     function persist() {
       localStorage.setItem(storeKey, JSON.stringify(state));
-      if (remoteReady) queueRemoteSave();
+      if (remoteReady && remoteLoaded) queueRemoteSave();
     }
 
     function queueRemoteSave() {
@@ -521,6 +528,7 @@
 
     async function saveRemoteNow() {
       if (!hasSupabase()) return;
+      backupSharedState(`${storeKey}-last-cloud-save`, "Копия перед записью в Supabase");
       await supabaseRequest("/rest/v1/crm_state?on_conflict=id", {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
@@ -545,6 +553,30 @@
         users: state.users,
         models: state.models
       };
+    }
+
+    function backupSharedState(key, reason) {
+      try {
+        localStorage.setItem(key, JSON.stringify({
+          reason,
+          createdAt: new Date().toISOString(),
+          data: sharedState()
+        }));
+      } catch (error) {
+        console.warn("Backup failed", error);
+      }
+    }
+
+    function readBackup(key) {
+      try { return JSON.parse(localStorage.getItem(key) || "null"); }
+      catch { return null; }
+    }
+
+    function applySharedData(data) {
+      if (!data?.users || !data?.models) return false;
+      state = normalizeStateData({ ...state, users: data.users, models: data.models });
+      persist();
+      return true;
     }
 
     persist();
@@ -663,7 +695,19 @@
 
     function renderLogin() {
       if (hasSupabase()) {
-        document.getElementById("quickLogins").innerHTML = `<div class="empty">Вход по доступу, созданному администратором в CRM</div>`;
+        const preRemote = readBackup(preRemoteBackupKey);
+        document.getElementById("quickLogins").innerHTML = `
+          <div class="empty">Вход по доступу, созданному администратором в CRM</div>
+          ${preRemote ? `
+            <div class="mini-block">
+              <span class="mini-title">Есть локальная копия</span>
+              <p class="muted">${escapeHtml(backupSummary(preRemote))}</p>
+              <button id="restorePreRemoteLogin">Восстановить локальную копию</button>
+            </div>
+          ` : ""}
+        `;
+        const restoreBtn = document.getElementById("restorePreRemoteLogin");
+        if (restoreBtn) restoreBtn.onclick = restorePreRemoteBackup;
         return;
       }
       document.getElementById("quickLogins").innerHTML = state.users.filter(u => u.active).map(u => `
@@ -784,6 +828,7 @@
           </div>
         </section>
         ${accessTab()}
+        ${backupTab()}
       `;
     }
 
@@ -1165,6 +1210,43 @@
       `;
     }
 
+    function backupTab() {
+      const preRemote = readBackup(preRemoteBackupKey);
+      const lastCloud = readBackup(`${storeKey}-last-cloud-save`);
+      return `
+        <section class="section">
+          <h3>Резервная копия</h3>
+          <div class="mini-block">
+            <span class="mini-title">Восстановление данных</span>
+            <p class="muted">Если модели есть в старом браузере, откройте CRM там, затем восстановите локальную копию и запишите ее в Supabase.</p>
+          </div>
+          <div class="access-row">
+            <div>
+              <span class="muted">До загрузки Supabase</span>
+              <p>${escapeHtml(backupSummary(preRemote))}</p>
+            </div>
+            <div>
+              <span class="muted">Перед последней записью в Supabase</span>
+              <p>${escapeHtml(backupSummary(lastCloud))}</p>
+            </div>
+            <button id="exportBackup">Скачать копию</button>
+            <label class="file-button">
+              <span>Импорт JSON</span>
+              <input id="importBackup" type="file" accept="application/json">
+            </label>
+            <button id="restorePreRemote" ${preRemote ? "" : "disabled"}>Восстановить локальную копию</button>
+            <button class="primary" id="forceCloudSave">Записать в Supabase</button>
+          </div>
+        </section>
+      `;
+    }
+
+    function backupSummary(backup) {
+      return backup
+        ? `${formatDateTime(backup.createdAt)} · моделей: ${(backup.data?.models || []).length}`
+        : "Копии пока нет";
+    }
+
     function actionButtons(m) {
       if (isDeleted(m) || m.status === "Завершено") return "";
       const user = currentUser();
@@ -1289,6 +1371,88 @@
         persist();
         render();
       });
+      bindBackupControls();
+    }
+
+    function bindBackupControls() {
+      const exportBtn = document.getElementById("exportBackup");
+      if (exportBtn) exportBtn.onclick = exportBackup;
+      const importInput = document.getElementById("importBackup");
+      if (importInput) importInput.onchange = importBackup;
+      const restoreBtn = document.getElementById("restorePreRemote");
+      if (restoreBtn) restoreBtn.onclick = restorePreRemoteBackup;
+      const forceBtn = document.getElementById("forceCloudSave");
+      if (forceBtn) forceBtn.onclick = () => {
+        if (!confirm("Записать текущие модели и доступы из этого браузера в Supabase?")) return;
+        remoteReady = true;
+        remoteLoaded = true;
+        saveRemoteNow().then(() => alert("Текущие данные записаны в Supabase")).catch(error => {
+          console.warn(error);
+          alert("Supabase не принял запись");
+        });
+      };
+    }
+
+    function restorePreRemoteBackup() {
+      const backup = readBackup(preRemoteBackupKey);
+      if (!backup?.data) return;
+      if (!confirm("Восстановить локальную копию и заменить текущие модели/доступы?")) return;
+      if (!applySharedData(backup.data)) return alert("Не удалось прочитать резервную копию");
+      remoteReady = true;
+      remoteLoaded = true;
+      saveRemoteNow().then(() => {
+        alert("Локальная копия восстановлена и записана в Supabase");
+        render();
+      }).catch(error => {
+        console.warn(error);
+        alert("Копия восстановлена в этом браузере, но Supabase не принял запись");
+        render();
+      });
+    }
+
+    function exportBackup() {
+      const payload = {
+        type: "fashion-crm-backup",
+        createdAt: new Date().toISOString(),
+        data: sharedState()
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `fashion-crm-backup-${today()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function importBackup(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result || "{}"));
+          const data = parsed.data?.users && parsed.data?.models ? parsed.data : parsed;
+          if (!data.users || !data.models) throw new Error("Bad backup");
+          if (!confirm("Импортировать копию и заменить текущие модели/доступы?")) return;
+          applySharedData(data);
+          remoteReady = true;
+          remoteLoaded = true;
+          saveRemoteNow().then(() => {
+            alert("Копия импортирована и записана в Supabase");
+            render();
+          }).catch(error => {
+            console.warn(error);
+            alert("Копия импортирована в этот браузер, но Supabase не принял запись");
+            render();
+          });
+        } catch (error) {
+          alert("Не удалось прочитать файл резервной копии");
+        } finally {
+          event.target.value = "";
+        }
+      };
+      reader.readAsText(file);
     }
 
     function runAction(action) {
