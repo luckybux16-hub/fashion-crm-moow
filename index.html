@@ -335,6 +335,9 @@
     let remoteLoaded = false;
     let remoteError = "";
     let remoteSaveTimer = null;
+    let lastCloudBackupAt = 0;
+    let cloudBackupsRequested = false;
+    const cloudBackupIntervalMs = 120000;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
     const users = [
       { id: "u-admin", name: "Админ", login: "admin", email: "admin@fashion-crm.local", password: "admin", role: "Админ", active: true },
@@ -361,6 +364,8 @@
       statsPeriod: "month",
       activeModelId: "",
       activeTab: "Основная",
+      cloudBackups: [],
+      cloudBackupError: "",
       users,
       models: [
         makeModel({ id: "m-draft", title: "Платье-комбинация", article: "DR-014", status: "Черновик", responsible: "u-owner", deadline: addDays(3), samples: [], corrections: [], unread: { "u-owner": 1 } }),
@@ -445,6 +450,8 @@
     function normalizeStateData(data) {
       data.statsPeriod = data.statsPeriod || "month";
       data.allResponsibleFilter = data.allResponsibleFilter || "";
+      data.cloudBackups = data.cloudBackups || [];
+      data.cloudBackupError = data.cloudBackupError || "";
       (data.users || []).forEach(user => user.email = user.email || defaultEmailForLogin(user.login));
       (data.models || []).forEach(model => {
         model.brand = model.brand || "Не определились";
@@ -529,11 +536,55 @@
     async function saveRemoteNow() {
       if (!hasSupabase()) return;
       backupSharedState(`${storeKey}-last-cloud-save`, "Копия перед записью в Supabase");
+      await createCloudBackup("Автокопия перед записью в Supabase").catch(error => console.warn("Cloud backup failed", error));
       await supabaseRequest("/rest/v1/crm_state?on_conflict=id", {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify({ id: "main", data: sharedState(), updated_at: new Date().toISOString() })
       });
+    }
+
+    async function createCloudBackup(reason, options = {}) {
+      if (!hasSupabase()) return false;
+      const force = !!options.force;
+      const now = Date.now();
+      if (!force && now - lastCloudBackupAt < cloudBackupIntervalMs) return false;
+      let data = options.data || null;
+      if (!data) {
+        const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data");
+        data = Array.isArray(rows) ? rows[0]?.data : null;
+      }
+      if (!data?.users || !data?.models) return false;
+      await supabaseRequest("/rest/v1/crm_backups", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ reason, data })
+      });
+      lastCloudBackupAt = now;
+      pruneCloudBackups().catch(error => console.warn("Cloud backup prune failed", error));
+      return true;
+    }
+
+    async function loadCloudBackups() {
+      if (!hasSupabase()) return;
+      try {
+        const rows = await supabaseRequest("/rest/v1/crm_backups?select=id,reason,created_at,data&order=created_at.desc&limit=20");
+        state.cloudBackups = Array.isArray(rows) ? rows : [];
+        state.cloudBackupError = "";
+        localStorage.setItem(storeKey, JSON.stringify(state));
+      } catch (error) {
+        state.cloudBackups = [];
+        state.cloudBackupError = "Облачные копии пока недоступны. Проверьте, что SQL для crm_backups выполнен в Supabase.";
+        console.warn("Cloud backups load failed", error);
+      }
+    }
+
+    async function pruneCloudBackups() {
+      const rows = await supabaseRequest("/rest/v1/crm_backups?select=id&order=created_at.desc&offset=20");
+      if (!Array.isArray(rows) || !rows.length) return;
+      const ids = rows.map(row => row.id).filter(Boolean).join(",");
+      if (!ids) return;
+      await supabaseRequest(`/rest/v1/crm_backups?id=in.(${ids})`, { method: "DELETE" });
     }
 
     function localUiState() {
@@ -544,7 +595,9 @@
         allResponsibleFilter: state.allResponsibleFilter,
         statsPeriod: state.statsPeriod,
         activeModelId: state.activeModelId,
-        activeTab: state.activeTab
+        activeTab: state.activeTab,
+        cloudBackups: state.cloudBackups,
+        cloudBackupError: state.cloudBackupError
       };
     }
 
@@ -695,19 +748,9 @@
 
     function renderLogin() {
       if (hasSupabase()) {
-        const preRemote = readBackup(preRemoteBackupKey);
         document.getElementById("quickLogins").innerHTML = `
           <div class="empty">Вход по доступу, созданному администратором в CRM</div>
-          ${preRemote ? `
-            <div class="mini-block">
-              <span class="mini-title">Есть локальная копия</span>
-              <p class="muted">${escapeHtml(backupSummary(preRemote))}</p>
-              <button id="restorePreRemoteLogin">Восстановить локальную копию</button>
-            </div>
-          ` : ""}
         `;
-        const restoreBtn = document.getElementById("restorePreRemoteLogin");
-        if (restoreBtn) restoreBtn.onclick = restorePreRemoteBackup;
         return;
       }
       document.getElementById("quickLogins").innerHTML = state.users.filter(u => u.active).map(u => `
@@ -1220,6 +1263,15 @@
             <span class="mini-title">Восстановление данных</span>
             <p class="muted">Если модели есть в старом браузере, откройте CRM там, затем восстановите локальную копию и запишите ее в Supabase.</p>
           </div>
+          <div class="mini-block">
+            <span class="mini-title">Облачные копии Supabase</span>
+            <p class="muted">CRM автоматически сохраняет предыдущую облачную версию перед записью новых данных. Хранятся последние 20 копий.</p>
+            <div class="actions">
+              <button id="refreshCloudBackups">Обновить список</button>
+              <button id="makeCloudBackup">Создать облачную копию сейчас</button>
+            </div>
+            ${state.cloudBackupError ? `<div class="empty">${escapeHtml(state.cloudBackupError)}</div>` : cloudBackupsList()}
+          </div>
           <div class="access-row">
             <div>
               <span class="muted">До загрузки Supabase</span>
@@ -1238,6 +1290,25 @@
             <button class="primary" id="forceCloudSave">Записать в Supabase</button>
           </div>
         </section>
+      `;
+    }
+
+    function cloudBackupsList() {
+      const rows = state.cloudBackups || [];
+      if (!hasSupabase()) return `<div class="empty">CRM сейчас в локальном режиме</div>`;
+      if (!rows.length) return `<div class="empty">Облачных копий пока нет</div>`;
+      return `
+        <div class="backup-list">
+          ${rows.map(backup => `
+            <div class="table-row">
+              <strong>${escapeHtml(formatDateTime(backup.created_at))}</strong>
+              <span>${escapeHtml(backup.reason || "Автокопия")}</span>
+              <span>${(backup.data?.models || []).length} моделей</span>
+              <span>${(backup.data?.users || []).length} доступов</span>
+              <button data-restore-cloud="${escapeAttr(backup.id)}">Восстановить</button>
+            </div>
+          `).join("")}
+        </div>
       `;
     }
 
@@ -1345,6 +1416,10 @@
     }
 
     function bindAccess() {
+      if (isAdmin() && hasSupabase() && !cloudBackupsRequested) {
+        cloudBackupsRequested = true;
+        loadCloudBackups().then(render).catch(error => console.warn(error));
+      }
       document.querySelectorAll("[data-user-field]").forEach(el => {
         el.onchange = el.oninput = () => {
           const user = state.users.find(u => u.id === el.dataset.user);
@@ -1391,6 +1466,43 @@
           alert("Supabase не принял запись");
         });
       };
+      const refreshCloud = document.getElementById("refreshCloudBackups");
+      if (refreshCloud) refreshCloud.onclick = () => {
+        loadCloudBackups().then(render).catch(error => {
+          console.warn(error);
+          alert("Не удалось загрузить облачные копии");
+        });
+      };
+      const makeCloud = document.getElementById("makeCloudBackup");
+      if (makeCloud) makeCloud.onclick = () => {
+        createCloudBackup("Ручная копия администратора", { force: true, data: sharedState() }).then(() => {
+          return loadCloudBackups();
+        }).then(() => {
+          alert("Облачная копия создана");
+          render();
+        }).catch(error => {
+          console.warn(error);
+          alert("Не удалось создать облачную копию. Проверьте SQL для crm_backups в Supabase.");
+        });
+      };
+      document.querySelectorAll("[data-restore-cloud]").forEach(btn => btn.onclick = () => restoreCloudBackup(btn.dataset.restoreCloud));
+    }
+
+    function restoreCloudBackup(id) {
+      const backup = (state.cloudBackups || []).find(item => item.id === id);
+      if (!backup?.data) return alert("Копия не найдена");
+      if (!confirm(`Восстановить облачную копию от ${formatDateTime(backup.created_at)} и заменить текущие модели/доступы?`)) return;
+      if (!applySharedData(backup.data)) return alert("Не удалось прочитать облачную копию");
+      remoteReady = true;
+      remoteLoaded = true;
+      saveRemoteNow().then(() => loadCloudBackups()).then(() => {
+        alert("Облачная копия восстановлена");
+        render();
+      }).catch(error => {
+        console.warn(error);
+        alert("Копия восстановлена в этом браузере, но Supabase не принял запись");
+        render();
+      });
     }
 
     function restorePreRemoteBackup() {
