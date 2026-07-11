@@ -23,6 +23,14 @@ Create these users in Supabase Authentication -> Users:
 
 After these users can log in, run `supabase/auth-schema.sql` to restrict CRM data to authenticated users only.
 
+When adding a new person later:
+
+1. Add them in CRM -> Доступы with the right role and email.
+2. Add the same email in Supabase Authentication -> Users.
+3. Set their Supabase password there.
+
+The CRM role record and Supabase Auth user are separate on purpose.
+
 ## Step 2. Configure Vercel
 
 Add environment variables:

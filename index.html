@@ -1175,11 +1175,12 @@
       return `
         <section class="section">
           <h3>Доступы</h3>
+          ${hasSupabase() ? `<div class="mini-block"><span class="mini-title">Supabase Auth</span><p class="muted">Доступ в CRM назначает роль, но не создает пользователя для входа. Для нового email отдельно создайте пользователя в Supabase Authentication с таким же email и паролем.</p></div>` : ""}
           <div class="access-row">
             ${field("newUserName", "Имя", "")}
             ${field("newUserLogin", "Логин", "")}
             ${field("newUserEmail", "Email для входа", "")}
-            ${field("newUserPassword", "Пароль", "")}
+            ${field("newUserPassword", hasSupabase() ? "Пароль в Supabase Auth" : "Пароль", "")}
             <label><span>Роль</span><select id="newUserRole">${roles.map(r => `<option>${r}</option>`).join("")}</select></label>
             <span></span>
             <button class="primary" id="createUser">Создать</button>
@@ -1189,7 +1190,7 @@
               <label><span>Имя</span><input data-user="${u.id}" data-user-field="name" value="${escapeAttr(u.name)}"></label>
               <label><span>Логин</span><input data-user="${u.id}" data-user-field="login" value="${escapeAttr(u.login)}"></label>
               <label><span>Email для входа</span><input data-user="${u.id}" data-user-field="email" value="${escapeAttr(u.email || defaultEmailForLogin(u.login))}"></label>
-              <label><span>Пароль</span><input data-user="${u.id}" data-user-field="password" value="${escapeAttr(u.password)}"></label>
+              <label><span>${hasSupabase() ? "Пароль в Supabase Auth" : "Пароль"}</span><input data-user="${u.id}" data-user-field="password" value="${escapeAttr(u.password)}"></label>
               <label><span>Роль</span><select data-user="${u.id}" data-user-field="role">${roles.map(r => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select></label>
               <label><span>Доступ</span><select data-user="${u.id}" data-user-field="active"><option value="true" ${u.active ? "selected" : ""}>Активен</option><option value="false" ${!u.active ? "selected" : ""}>Отключен</option></select></label>
               <button class="danger" data-delete-user="${u.id}" ${u.id === currentUser().id ? "disabled" : ""}>Удалить</button>
@@ -1313,7 +1314,7 @@
         const email = document.querySelector("[data-field='newUserEmail']").value.trim() || defaultEmailForLogin(login);
         const password = document.querySelector("[data-field='newUserPassword']").value.trim();
         const role = document.getElementById("newUserRole").value;
-        if (!name || !login || !password) return;
+        if (!name || !login || (!hasSupabase() && !password)) return;
         state.users.push({ id: uid(), name, login, email, password, role, active: true });
         persist();
         render();
@@ -1623,7 +1624,7 @@
           return;
         } catch (error) {
           console.warn("Supabase auth failed", error);
-          document.getElementById("loginError").textContent = "Supabase Auth не принял email или пароль";
+          document.getElementById("loginError").textContent = "Supabase Auth не принял email или пароль. Проверьте, что такой пользователь создан в Supabase Authentication.";
           return;
         }
       }
