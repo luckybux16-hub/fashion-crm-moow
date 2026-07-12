@@ -250,6 +250,19 @@
       z-index: 4;
       backdrop-filter: blur(12px);
     }
+    .save-state {
+      display: inline-flex;
+      align-items: center;
+      min-height: 40px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 850;
+    }
+    .save-state.dirty { background: #fff8e7; border-color: rgba(184,117,18,.28); color: #8a5c10; }
     .section { display: grid; gap: 14px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: var(--shadow); }
     .subsection { display: grid; gap: 12px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
     .primary-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: stretch; }
@@ -581,6 +594,7 @@
     let remoteSaveQueued = false;
     let remoteBaselineShared = null;
     let accessDraft = null;
+    const unsavedModelIds = new Set();
     const cloudBackupIntervalMs = 120000;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
     const users = [
@@ -779,6 +793,7 @@
     function persist() {
       localStorage.setItem(storeKey, JSON.stringify(state));
       if (hasSupabase() && !remoteLoaded) localChangedBeforeRemoteLoad = true;
+      if (unsavedModelIds.size) return;
       if (remoteReady && remoteLoaded) queueRemoteSave();
     }
 
@@ -1460,7 +1475,11 @@
               <h2>${escapeHtml(m.title || "Без названия")}</h2>
               <p class="muted">${escapeHtml(m.article || "без артикула")}</p>
             </div>
-            <div class="actions">${actionButtons(m)}</div>
+            <div class="actions">
+              ${canEditPrimary() ? `<button class="primary" id="saveModelChanges" ${unsavedModelIds.has(m.id) ? "" : "disabled"}>Сохранить изменения</button>` : ""}
+              ${canEditPrimary() ? `<span class="save-state ${unsavedModelIds.has(m.id) ? "dirty" : ""}" id="saveState">${unsavedModelIds.has(m.id) ? "Есть несохраненные изменения" : "Все изменения сохранены"}</span>` : ""}
+              ${actionButtons(m)}
+            </div>
           </div>
           <div class="statusline">
             ${statusBadge(m.status, "status-main")}
@@ -1902,12 +1921,22 @@
     function bindDetail() {
       document.getElementById("backHome").onclick = () => { state.view = "dashboard"; state.activeModelId = ""; persist(); render(); };
       document.querySelectorAll("[data-tab]").forEach(btn => btn.onclick = () => { state.activeTab = btn.dataset.tab; persist(); render(); });
-      document.querySelectorAll("[data-action]").forEach(btn => btn.onclick = () => runAction(btn.dataset.action));
+      document.querySelectorAll("[data-action]").forEach(btn => btn.onclick = () => {
+        if (!ensureCurrentModelSaved()) return;
+        runAction(btn.dataset.action);
+      });
+      const saveChanges = document.getElementById("saveModelChanges");
+      if (saveChanges) saveChanges.onclick = saveCurrentModelChanges;
       bindPrimary();
       bindPayments();
       bindAccess();
       const addLink = document.getElementById("addLink");
-      if (addLink) addLink.onclick = () => { currentModel().links.push(""); persist(); render(); };
+      if (addLink) addLink.onclick = () => {
+        const m = currentModel();
+        m.links.push("");
+        markModelUnsaved(m);
+        render();
+      };
       document.querySelectorAll("[data-delete-link]").forEach(btn => {
         btn.onclick = () => {
           const m = currentModel();
@@ -1915,16 +1944,22 @@
           const removed = m.links[index] || "";
           m.links.splice(index, 1);
           addHistory(m, `Удалена ссылка ${index + 1}`, { field: "Ссылка", from: removed, to: "-" });
-          persist();
+          markModelUnsaved(m);
           render();
         };
       });
       const send = document.getElementById("sendComment");
       if (send) send.onclick = sendComment;
       const adminSave = document.getElementById("adminSave");
-      if (adminSave) adminSave.onclick = adminSaveModel;
+      if (adminSave) adminSave.onclick = () => {
+        if (!ensureCurrentModelSaved()) return;
+        adminSaveModel();
+      };
       const del = document.getElementById("deleteModel");
-      if (del) del.onclick = openDeleteModal;
+      if (del) del.onclick = () => {
+        if (!ensureCurrentModelSaved()) return;
+        openDeleteModal();
+      };
       const photoInput = document.getElementById("modelPhotoInput");
       if (photoInput) photoInput.onchange = handleModelPhotoUpload;
       const removePhoto = document.getElementById("removeModelPhoto");
@@ -1932,7 +1967,7 @@
         const m = currentModel();
         m.photoDataUrl = "";
         addHistory(m, "Удалено фото модели");
-        persist();
+        markModelUnsaved(m);
         render();
       };
       bindPhotoOpeners();
@@ -1950,7 +1985,7 @@
           else if (key in m) m[key] = el.value;
           if (key === "constructorUserId") replaceParticipantByRole(m, el.value, "Конструктор");
           if (key === "workshopUserId") replaceParticipantByRole(m, el.value, "Цех");
-          persist();
+          markModelUnsaved(m);
         };
         el.oninput = updateValue;
         el.onchange = () => {
@@ -1959,7 +1994,7 @@
           if (changed) {
             addHistory(currentModel(), `Изменено поле "${labelFor(key)}"`, { field: labelFor(key), from: initialValue, to: el.value });
             initialValue = el.value;
-            persist();
+            markModelUnsaved(currentModel());
           }
         };
       });
@@ -1967,6 +2002,7 @@
 
     function bindPayments() {
       document.querySelectorAll("[data-pay]").forEach(btn => btn.onclick = () => {
+        if (!ensureCurrentModelSaved()) return;
         if (!canPay()) return;
         const [type, index] = btn.dataset.pay.split(":");
         const m = currentModel();
@@ -1978,6 +2014,59 @@
         persist();
         render();
       });
+    }
+
+    function markModelUnsaved(model) {
+      if (!model) return;
+      unsavedModelIds.add(model.id);
+      localStorage.setItem(storeKey, JSON.stringify(state));
+      updateSaveState(model.id);
+    }
+
+    function updateSaveState(modelId) {
+      const dirty = unsavedModelIds.has(modelId);
+      const btn = document.getElementById("saveModelChanges");
+      const stateLabel = document.getElementById("saveState");
+      if (btn) btn.disabled = !dirty;
+      if (stateLabel) {
+        stateLabel.classList.toggle("dirty", dirty);
+        stateLabel.textContent = dirty ? "Есть несохраненные изменения" : "Все изменения сохранены";
+      }
+    }
+
+    async function saveCurrentModelChanges() {
+      const m = currentModel();
+      if (!m) return;
+      if (!unsavedModelIds.has(m.id)) return;
+      const btn = document.getElementById("saveModelChanges");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Сохраняю...";
+      }
+      try {
+        localStorage.setItem(storeKey, JSON.stringify(state));
+        if (hasSupabase()) {
+          if (!remoteReady || !remoteLoaded) throw new Error("Remote database is not ready");
+          await saveRemoteNow();
+        } else {
+          localStorage.setItem(storeKey, JSON.stringify(state));
+        }
+        unsavedModelIds.delete(m.id);
+        updateSaveState(m.id);
+        render();
+      } catch (error) {
+        console.warn("Model save failed", error);
+        unsavedModelIds.add(m.id);
+        updateSaveState(m.id);
+        alert("Не удалось сохранить изменения. Проверьте подключение и попробуйте еще раз.");
+      }
+    }
+
+    function ensureCurrentModelSaved() {
+      const m = currentModel();
+      if (!m || !unsavedModelIds.has(m.id)) return true;
+      alert("Сначала нажмите “Сохранить изменения” в заявке.");
+      return false;
     }
 
     function bindAccess() {
@@ -2459,6 +2548,7 @@
     }
 
     function sendComment() {
+      if (!ensureCurrentModelSaved()) return;
       const m = currentModel();
       const text = document.querySelector("[data-field='newComment']").value.trim();
       if (!text) return;
@@ -2489,7 +2579,7 @@
         m.photoDataUrl = canvas.toDataURL("image/jpeg", 0.86);
         addHistory(m, "Обновлено фото модели");
         URL.revokeObjectURL(objectUrl);
-        persist();
+        markModelUnsaved(m);
         render();
       };
       img.onerror = () => {
