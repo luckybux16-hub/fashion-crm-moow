@@ -133,6 +133,23 @@
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .link-list { display: grid; gap: 10px; }
+    .link-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 8px; }
+    .link-row a {
+      min-height: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+      border: 1px solid rgba(23, 115, 102, .25);
+      border-radius: 8px;
+      background: #f6fbf9;
+      color: #177366;
+      font-weight: 850;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .empty-links { border: 1px dashed var(--line); border-radius: 8px; padding: 12px; color: var(--muted); font-weight: 750; }
     .primary-row { display: grid; grid-template-columns: 1fr 118px 2fr 1fr; gap: 12px; align-items: end; }
     .span-2 { grid-column: span 2; }
     .span-3 { grid-column: span 3; }
@@ -275,6 +292,7 @@
     .text-block.link-note { background: #fff7fb; border-color: rgba(180, 88, 145, .28); }
     .text-block span { color: var(--muted); font-size: 13px; font-weight: 750; }
     .text-block p { font-size: 15px; overflow-wrap: anywhere; }
+    .text-block a { color: #177366; font-weight: 850; overflow-wrap: anywhere; text-decoration-thickness: 2px; text-underline-offset: 3px; }
     .check-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .pay-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 1.2fr; gap: 12px; }
     .pay-summary .stat.total { background: #f3edff; border-color: #cdbbeb; }
@@ -363,6 +381,7 @@
 
     @media (max-width: 980px) {
       .login-card, .grid, .grid.three, .grid.four, .stat-grid, .card-grid, .table-row, .table-row.workshop-pay-row, .history-row, .access-row, .pay-summary { grid-template-columns: 1fr; }
+      .link-row { grid-template-columns: 1fr; }
       .welcome-panel { grid-template-columns: 1fr; }
       .primary-layout { grid-template-columns: 1fr; }
       .photo-preview { max-width: 280px; }
@@ -1351,7 +1370,7 @@
           </div>
           <div class="subsection">
             <div class="toolbar"><h3>Ссылки на фото/видео</h3>${canEditPrimary() ? `<button id="addLink">+ Добавить ссылку</button>` : ""}</div>
-            <div class="grid">${m.links.map((link, i) => field(`link:${i}`, `Ссылка ${i + 1}`, link)).join("")}</div>
+            ${linksList(m.links)}
           </div>
         </section>
         ${m.pattern.sentAt ? patternBlock(m) : ""}
@@ -1423,7 +1442,7 @@
           ])}
           ${statusMiniBlock(c.status)}
           ${textMiniBlock(`Корректировки ${c.number}`, c.text, "correction-note")}
-          ${textMiniBlock("Ссылка на фото/видео корректировок", c.link, "link-note")}
+          ${linkMiniBlock("Ссылка на фото/видео корректировок", c.link, "link-note")}
           ${checksMiniBlock([
             ["Проставлены все надсечки", c.checklist.notches],
             ["Все детали есть в печати", c.checklist.printDetails],
@@ -1731,6 +1750,17 @@
       bindAccess();
       const addLink = document.getElementById("addLink");
       if (addLink) addLink.onclick = () => { currentModel().links.push(""); persist(); render(); };
+      document.querySelectorAll("[data-delete-link]").forEach(btn => {
+        btn.onclick = () => {
+          const m = currentModel();
+          const index = Number(btn.dataset.deleteLink);
+          const removed = m.links[index] || "";
+          m.links.splice(index, 1);
+          addHistory(m, `Удалена ссылка ${index + 1}`, { field: "Ссылка", from: removed, to: "-" });
+          persist();
+          render();
+        };
+      });
       const send = document.getElementById("sendComment");
       if (send) send.onclick = sendComment;
       const adminSave = document.getElementById("adminSave");
@@ -2420,6 +2450,30 @@
     }
     function textMiniBlock(label, value, tone = "") {
       return `<div class="text-block ${tone}"><span>${escapeHtml(label)}</span><p>${escapeHtml(value || "-")}</p></div>`;
+    }
+    function linkMiniBlock(label, value, tone = "") {
+      const href = linkHref(value);
+      const content = href ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>` : "-";
+      return `<div class="text-block ${tone}"><span>${escapeHtml(label)}</span><p>${content}</p></div>`;
+    }
+    function linksList(links = []) {
+      const rows = links.map((link, i) => {
+        const href = linkHref(link);
+        return `
+          <div class="link-row">
+            ${field(`link:${i}`, `Ссылка ${i + 1}`, link)}
+            ${href ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">Открыть</a>` : `<span></span>`}
+            ${canEditPrimary() ? `<button class="danger" data-delete-link="${i}">Удалить</button>` : `<span></span>`}
+          </div>
+        `;
+      }).join("");
+      return `<div class="link-list">${rows || `<div class="empty-links">Ссылок пока нет</div>`}</div>`;
+    }
+    function linkHref(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      if (/^(https?:\/\/|tg:\/\/|mailto:)/i.test(raw)) return raw;
+      return `https://${raw}`;
     }
     function checksMiniBlock(items) {
       return `<div class="mini-block"><span class="mini-title">Проверочный чек-лист</span><div class="check-row">${items.map(([label, checked]) => checkView(label, checked)).join("")}</div></div>`;
