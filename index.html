@@ -1210,6 +1210,12 @@
       return `Название на лекалах обновлено на ${name}, ${article}`;
     }
 
+    function patternSignedLabel(model) {
+      const name = model.title || "название модели";
+      const article = model.article || "артикул";
+      return `На лекалах подписан артикул и название модели (${name}, ${article})`;
+    }
+
     function render() {
       renderShell();
       renderLogin();
@@ -2253,6 +2259,11 @@
       notifyUsers([...userIds, ...adminUserIds()], taskNotification(model, title));
     }
 
+    function notifyAssigneeTask(model, assigneeUserId, assigneeTitle, adminTitle) {
+      notifyUsers([assigneeUserId], taskNotification(model, assigneeTitle));
+      notifyUsers(adminUserIds(), taskNotification(model, adminTitle));
+    }
+
     async function findTelegramChatId(user) {
       try {
         const response = await fetch("/api/telegram", {
@@ -2440,13 +2451,13 @@
           m.deadline = "";
           m.pattern.sentAt = today();
           replaceParticipantByRole(m, m.constructorUserId, "Конструктор");
-          notifyMovement(m, "Вам передана задача на разработку лекал", [m.constructorUserId]);
+          notifyAssigneeTask(m, m.constructorUserId, "Вам передана задача на разработку лекал", "Конструктору передана задача на разработку моделей");
           saveAndRender();
         },
         "take-pattern": () => askDeadline("Дата сдачи лекал", date => {
           changeStatus(m, "Лекала в работе", "Конструктор взял лекала в работу"); m.deadline = date; m.pattern.acceptedAt = today(); m.pattern.deadline = date; notifyMovement(m, "Конструктор взял лекала в работу", [m.ownerUserId]); saveAndRender();
         }),
-        "patterns-ready": () => checklistModal("Лекала готовы", checklistFields("pattern"), [{ id: "cost", label: "Стоимость за лекала", type: "number", required: true }], data => {
+        "patterns-ready": () => checklistModal("Лекала готовы", checklistFields(m), [{ id: "cost", label: "Стоимость за лекала", type: "number", required: true }], data => {
           m.pattern.checklist = pickChecklist(data); m.pattern.cost = Number(data.cost); m.pattern.readyAt = today();
           m.payments.constructor[0].amount = Number(data.cost); changeStatus(m, "Лекала готовы", "Лекала готовы"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, "Лекала готовы, требуется действие владельца", [m.ownerUserId]); saveAndRender();
         }),
@@ -2454,7 +2465,7 @@
           if (!m.workshopUserId) return alert("Выберите цех");
           const number = m.samples.length + 1;
           m.samples.push(sample(number, { status: `Отшив образца ${number}`, sentAt: today(), ownerComment: data.comment }));
-          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); notifyMovement(m, `Вам передан отшив образца ${number}`, [m.workshopUserId]); saveAndRender();
+          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); notifyAssigneeTask(m, m.workshopUserId, `Вам передан отшив образца ${number}`, `Цеху передан отшив образца ${number}`); saveAndRender();
         }),
         "take-sample": () => askDeadline(`Дата сдачи образца ${n}`, date => {
           const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; changeStatus(m, s.status, `Цех взял в работу образец ${s.number}`); m.deadline = date; notifyMovement(m, `Цех взял в работу образец ${s.number}`, [m.ownerUserId]); saveAndRender();
@@ -2473,12 +2484,12 @@
           { id: "link", label: "Ссылка на Google Drive с фото/видео", type: "text", required: false }
         ], data => {
           const number = m.corrections.length + 1; m.corrections.push(correction(number, { text: data.text, link: data.link }));
-          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyMovement(m, `Вам поданы корректировки ${number}`, [m.constructorUserId]); saveAndRender();
+          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyAssigneeTask(m, m.constructorUserId, `Вам поданы корректировки ${number}`, `Конструктору переданы корректировки ${number}`); saveAndRender();
         }),
         "take-correction": () => askDeadline(`Дата сдачи корректировок ${n}`, date => {
           const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; changeStatus(m, c.status, `Конструктор взял в работу корректировки ${c.number}`); m.deadline = date; notifyMovement(m, `Конструктор взял в работу корректировки ${c.number}`, [m.ownerUserId]); saveAndRender();
         }),
-        "correction-ready": () => checklistModal(`Корректировки ${n} готовы`, checklistFields("correction"), [{ id: "printCost", label: "Сумма за печать", type: "number", required: true }], data => {
+        "correction-ready": () => checklistModal(`Корректировки ${n} готовы`, checklistFields(m), [{ id: "printCost", label: "Сумма за печать", type: "number", required: true }], data => {
           const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); changeStatus(m, c.status, `Корректировки ${c.number} готовы`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, `Корректировки ${c.number} готовы, требуется действие владельца`, [m.ownerUserId]); saveAndRender();
         }),
         "send-grading": () => formModal("Подать на градацию", [
@@ -2487,7 +2498,7 @@
           { id: "comment", label: "Обновленный комментарий по градации", type: "textarea", required: true, value: m.gradingComment },
           { id: "extraComment", label: "Дополнительный комментарий", type: "textarea", required: true }
         ], data => {
-          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyMovement(m, "Вам передана градация", [m.constructorUserId]); saveAndRender();
+          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyAssigneeTask(m, m.constructorUserId, "Вам передана градация", "Конструктору передана задача на градацию"); saveAndRender();
         }),
         "take-grading": () => askDeadline("Дата готовности градации", date => {
           changeStatus(m, "Градация в работе", "Конструктор взял градацию в работу"); m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; notifyMovement(m, "Конструктор взял градацию в работу", [m.ownerUserId]); saveAndRender();
@@ -2521,11 +2532,11 @@
     function currentSample(m) { const n = getCurrentNumber(m); return m.samples.find(s => s.number === n) || m.samples[m.samples.length - 1]; }
     function currentCorrection(m) { const n = getCurrentNumber(m); return m.corrections.find(c => c.number === n) || m.corrections[m.corrections.length - 1]; }
     function askDeadline(title, cb) { formModal(title, [{ id: "deadline", label: "Плановая дата готовности", type: "date", required: true }], data => cb(data.deadline)); }
-    function checklistFields() {
+    function checklistFields(model) {
       return [
         { id: "notches", label: "Проставлены все надсечки" },
         { id: "printDetails", label: "Все детали есть в печати" },
-        { id: "signed", label: "На лекалах подписан артикул и название модели" }
+        { id: "signed", label: patternSignedLabel(model) }
       ];
     }
     function pickChecklist(data) { return { notches: !!data.notches, printDetails: !!data.printDetails, signed: !!data.signed }; }
