@@ -618,6 +618,8 @@
     let remoteSaveQueued = false;
     let remoteBaselineShared = null;
     let accessDraft = null;
+    let initialModelHash = "";
+    let modelHashConsumed = false;
     const unsavedModelIds = new Set();
     const cloudBackupIntervalMs = 120000;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
@@ -651,6 +653,8 @@
       syncConflict: false,
       conflictNotice: "",
       loginEvents: [],
+      telegramReminderLog: [],
+      telegramDigestLog: [],
       users,
       models: [
         makeModel({ id: "m-draft", title: "Платье-комбинация", article: "DR-014", status: "Черновик", responsible: "u-owner", deadline: addDays(3), samples: [], corrections: [], unread: { "u-owner": 1 } }),
@@ -740,6 +744,8 @@
       data.syncConflict = !!data.syncConflict;
       data.conflictNotice = data.conflictNotice || "";
       data.loginEvents = data.loginEvents || [];
+      data.telegramReminderLog = data.telegramReminderLog || [];
+      data.telegramDigestLog = data.telegramDigestLog || [];
       data.users = normalizeUsers(data.users || []);
       (data.models || []).forEach(model => {
         model.brand = model.brand || "Не определились";
@@ -804,6 +810,7 @@
           localChangedBeforeRemoteLoad = false;
           queueRemoteSave();
         }
+        runTelegramAutomations();
         render();
       } catch (error) {
         remoteReady = false;
@@ -972,7 +979,9 @@
       return {
         users: state.users,
         models: state.models,
-        loginEvents: state.loginEvents
+        loginEvents: state.loginEvents,
+        telegramReminderLog: state.telegramReminderLog,
+        telegramDigestLog: state.telegramDigestLog
       };
     }
 
@@ -980,7 +989,9 @@
       return {
         users: structuredClone(source.users || []),
         models: structuredClone(source.models || []),
-        loginEvents: structuredClone(source.loginEvents || [])
+        loginEvents: structuredClone(source.loginEvents || []),
+        telegramReminderLog: structuredClone(source.telegramReminderLog || []),
+        telegramDigestLog: structuredClone(source.telegramDigestLog || [])
       };
     }
 
@@ -1003,7 +1014,9 @@
       return {
         users: Array.from(usersById.values()),
         models: Array.from(modelsById.values()).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))),
-        loginEvents: Array.from(loginEventsById.values()).sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 200)
+        loginEvents: Array.from(loginEventsById.values()).sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 200),
+        telegramReminderLog: mergeUniqueStrings(remoteData.telegramReminderLog || [], localData.telegramReminderLog || []),
+        telegramDigestLog: mergeUniqueStrings(remoteData.telegramDigestLog || [], localData.telegramDigestLog || [])
       };
     }
 
@@ -1036,7 +1049,9 @@
         data: {
           users: mergeUsersForConcurrentSave(remoteData.users || [], localData.users || [], baselineData?.users || []),
           models: models.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))),
-          loginEvents: mergeLoginEvents(remoteData.loginEvents || [], localData.loginEvents || [])
+          loginEvents: mergeLoginEvents(remoteData.loginEvents || [], localData.loginEvents || []),
+          telegramReminderLog: mergeUniqueStrings(remoteData.telegramReminderLog || [], localData.telegramReminderLog || []),
+          telegramDigestLog: mergeUniqueStrings(remoteData.telegramDigestLog || [], localData.telegramDigestLog || [])
         }
       };
     }
@@ -1063,6 +1078,10 @@
         if (event?.id && !byId.has(event.id)) byId.set(event.id, event);
       });
       return Array.from(byId.values()).sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 200);
+    }
+
+    function mergeUniqueStrings(a = [], b = []) {
+      return [...new Set([...a, ...b].filter(Boolean))].slice(-500);
     }
 
     function modelTitleById(id, data = sharedState()) {
@@ -1102,7 +1121,14 @@
 
     function applySharedData(data) {
       if (!data?.users || !data?.models) return false;
-      state = normalizeStateData({ ...state, users: data.users, models: data.models, loginEvents: data.loginEvents || state.loginEvents || [] });
+      state = normalizeStateData({
+        ...state,
+        users: data.users,
+        models: data.models,
+        loginEvents: data.loginEvents || state.loginEvents || [],
+        telegramReminderLog: data.telegramReminderLog || state.telegramReminderLog || [],
+        telegramDigestLog: data.telegramDigestLog || state.telegramDigestLog || []
+      });
       persist();
       return true;
     }
@@ -1220,8 +1246,28 @@
       renderShell();
       renderLogin();
       if (!currentUser()) return;
+      applyInitialModelLink();
       if (state.view === "detail" && currentModel()) renderDetail();
       else renderHome();
+    }
+
+    function requestedModelId() {
+      if (initialModelHash) return initialModelHash;
+      const hash = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
+      initialModelHash = new URLSearchParams(hash).get("model") || "";
+      return initialModelHash;
+    }
+
+    function applyInitialModelLink() {
+      if (modelHashConsumed) return;
+      const id = requestedModelId();
+      if (!id) return;
+      const model = state.models.find(m => m.id === id);
+      if (!model || !hasAccess(model)) return;
+      state.activeModelId = model.id;
+      state.view = "detail";
+      state.activeTab = "Основная";
+      modelHashConsumed = true;
     }
 
     function renderShell() {
@@ -2255,13 +2301,74 @@
       return state.users.filter(user => isAdminRole(user.role) && user.active).map(user => user.id);
     }
 
+    function runTelegramAutomations() {
+      if (!currentUser()) return;
+      sendDeadlineReminders();
+      sendAdminDailyDigest();
+      localStorage.setItem(storeKey, JSON.stringify(state));
+      if (remoteReady && remoteLoaded && !unsavedModelIds.size) queueRemoteSave();
+    }
+
+    function sendDeadlineReminders() {
+      state.telegramReminderLog = state.telegramReminderLog || [];
+      state.models.filter(m => inProcess(m) && m.deadline).forEach(model => {
+        const days = daysUntil(model.deadline);
+        const kind = days < 0 ? "overdue" : days === 1 ? "tomorrow" : "";
+        if (!kind) return;
+        const key = `${today()}:${kind}:${model.id}:${model.deadline}`;
+        if (state.telegramReminderLog.includes(key)) return;
+        const title = kind === "overdue"
+          ? `Просрочен дедлайн по заявке (${Math.abs(days)} дн.)`
+          : "До дедлайна остался 1 день";
+        notifyUsers([model.currentResponsibleUserId, ...adminUserIds()], taskNotification(model, title));
+        state.telegramReminderLog.push(key);
+      });
+      state.telegramReminderLog = state.telegramReminderLog.slice(-500);
+    }
+
+    function sendAdminDailyDigest() {
+      if (!isAdmin()) return;
+      state.telegramDigestLog = state.telegramDigestLog || [];
+      const key = `${today()}:admin-digest`;
+      if (state.telegramDigestLog.includes(key)) return;
+      const active = state.models.filter(inProcess);
+      const overdue = active.filter(m => m.deadline && daysUntil(m.deadline) < 0);
+      const dueToday = active.filter(m => m.deadline && daysUntil(m.deadline) === 0);
+      const dueTomorrow = active.filter(m => m.deadline && daysUntil(m.deadline) === 1);
+      const lines = [
+        "Ежедневная сводка CRM",
+        `В работе: ${active.length}`,
+        `Просрочено: ${overdue.length}`,
+        `Сдать сегодня: ${dueToday.length}`,
+        `Дедлайн завтра: ${dueTomorrow.length}`,
+        "",
+        ...digestModelLines("Просрочено", overdue),
+        ...digestModelLines("Сегодня", dueToday),
+        ...digestModelLines("Завтра", dueTomorrow)
+      ];
+      notifyUsers(adminUserIds(), lines.filter(line => line !== null).join("\n"));
+      state.telegramDigestLog.push(key);
+      state.telegramDigestLog = state.telegramDigestLog.slice(-120);
+    }
+
+    function digestModelLines(title, models) {
+      if (!models.length) return [];
+      return [title + ":", ...models.slice(0, 8).map(m => `- ${modelLine(m)} · ${m.status} · ${userName(m.currentResponsibleUserId)}`)];
+    }
+
+    function daysUntil(dateValue) {
+      const start = new Date(today() + "T00:00:00");
+      const end = new Date(dateValue + "T00:00:00");
+      return Math.round((end - start) / 86400000);
+    }
+
     function notifyMovement(model, title, userIds = []) {
       notifyUsers([...userIds, ...adminUserIds()], taskNotification(model, title));
     }
 
-    function notifyAssigneeTask(model, assigneeUserId, assigneeTitle, adminTitle) {
-      notifyUsers([assigneeUserId], taskNotification(model, assigneeTitle));
-      notifyUsers(adminUserIds(), taskNotification(model, adminTitle));
+    function notifyAssigneeTask(model, assigneeUserId, assigneeTitle, adminTitle, extra = []) {
+      notifyUsers([assigneeUserId], taskNotification(model, assigneeTitle, extra));
+      notifyUsers(adminUserIds(), taskNotification(model, adminTitle, extra));
     }
 
     async function findTelegramChatId(user) {
@@ -2311,8 +2418,32 @@
       return `${model.title || "Без названия"}${model.article ? ` · ${model.article}` : ""}`;
     }
 
-    function taskNotification(model, title) {
-      return `${title}\nМодель: ${modelLine(model)}\nСтатус: ${model.status}\nДедлайн: ${model.deadline || "не задан"}`;
+    function modelUrl(model) {
+      return `${location.origin}${location.pathname}#model=${encodeURIComponent(model.id)}`;
+    }
+
+    function taskNotification(model, title, extra = []) {
+      const lines = [
+        title,
+        `Модель: ${modelLine(model)}`,
+        `Статус: ${model.status}`,
+        `Дедлайн: ${model.deadline || "не задан"}`,
+        ...extra.filter(Boolean),
+        `Открыть заявку: ${modelUrl(model)}`
+      ];
+      return lines.join("\n");
+    }
+
+    function taskContext(model, type) {
+      if (type === "pattern") {
+        return [
+          model.sizeRange ? `Размерный ряд: ${model.sizeRange}` : "",
+          model.material ? `Материал: ${model.material}` : "",
+          model.hardware ? `Фурнитура: ${model.hardware}` : "",
+          model.gradingComment ? `Комментарий по градации: ${model.gradingComment}` : ""
+        ];
+      }
+      return [];
     }
 
     function bindBackupControls() {
@@ -2451,7 +2582,7 @@
           m.deadline = "";
           m.pattern.sentAt = today();
           replaceParticipantByRole(m, m.constructorUserId, "Конструктор");
-          notifyAssigneeTask(m, m.constructorUserId, "Вам передана задача на разработку лекал", "Конструктору передана задача на разработку моделей");
+          notifyAssigneeTask(m, m.constructorUserId, "Вам передана задача на разработку лекал", "Конструктору передана задача на разработку моделей", taskContext(m, "pattern"));
           saveAndRender();
         },
         "take-pattern": () => askDeadline("Дата сдачи лекал", date => {
@@ -2465,7 +2596,7 @@
           if (!m.workshopUserId) return alert("Выберите цех");
           const number = m.samples.length + 1;
           m.samples.push(sample(number, { status: `Отшив образца ${number}`, sentAt: today(), ownerComment: data.comment }));
-          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); notifyAssigneeTask(m, m.workshopUserId, `Вам передан отшив образца ${number}`, `Цеху передан отшив образца ${number}`); saveAndRender();
+          changeStatus(m, `Отшив образца ${number}`, `Передано в цех на отшив образца ${number}`); m.currentResponsibleUserId = m.workshopUserId; m.deadline = ""; replaceParticipantByRole(m, m.workshopUserId, "Цех"); notifyAssigneeTask(m, m.workshopUserId, `Вам передан отшив образца ${number}`, `Цеху передан отшив образца ${number}`, [`Комментарий для цеха: ${data.comment}`]); saveAndRender();
         }),
         "take-sample": () => askDeadline(`Дата сдачи образца ${n}`, date => {
           const s = currentSample(m); s.status = `Образец ${s.number} в работе`; s.acceptedAt = today(); s.deadline = date; changeStatus(m, s.status, `Цех взял в работу образец ${s.number}`); m.deadline = date; notifyMovement(m, `Цех взял в работу образец ${s.number}`, [m.ownerUserId]); saveAndRender();
@@ -2484,7 +2615,7 @@
           { id: "link", label: "Ссылка на Google Drive с фото/видео", type: "text", required: false }
         ], data => {
           const number = m.corrections.length + 1; m.corrections.push(correction(number, { text: data.text, link: data.link }));
-          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyAssigneeTask(m, m.constructorUserId, `Вам поданы корректировки ${number}`, `Конструктору переданы корректировки ${number}`); saveAndRender();
+          changeStatus(m, `Поданы корректировки ${number}`, `Поданы корректировки ${number}`); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyAssigneeTask(m, m.constructorUserId, `Вам поданы корректировки ${number}`, `Конструктору переданы корректировки ${number}`, [`Текст корректировок: ${data.text}`, data.link ? `Ссылка: ${data.link}` : ""]); saveAndRender();
         }),
         "take-correction": () => askDeadline(`Дата сдачи корректировок ${n}`, date => {
           const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; changeStatus(m, c.status, `Конструктор взял в работу корректировки ${c.number}`); m.deadline = date; notifyMovement(m, `Конструктор взял в работу корректировки ${c.number}`, [m.ownerUserId]); saveAndRender();
@@ -2498,7 +2629,7 @@
           { id: "comment", label: "Обновленный комментарий по градации", type: "textarea", required: true, value: m.gradingComment },
           { id: "extraComment", label: "Дополнительный комментарий", type: "textarea", required: true }
         ], data => {
-          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyAssigneeTask(m, m.constructorUserId, "Вам передана градация", "Конструктору передана задача на градацию"); saveAndRender();
+          m.grading = { ...m.grading, ...data, sentAt: today() }; changeStatus(m, "Передано на градацию", "Модель передана на градацию"); m.currentResponsibleUserId = m.constructorUserId; m.deadline = ""; notifyAssigneeTask(m, m.constructorUserId, "Вам передана градация", "Конструктору передана задача на градацию", [`Финальное название: ${data.finalName}`, `Размеры: ${data.sizes}`, `Комментарий: ${data.comment}`, `Дополнительно: ${data.extraComment}`]); saveAndRender();
         }),
         "take-grading": () => askDeadline("Дата готовности градации", date => {
           changeStatus(m, "Градация в работе", "Конструктор взял градацию в работу"); m.deadline = date; m.grading.acceptedAt = today(); m.grading.deadline = date; notifyMovement(m, "Конструктор взял градацию в работу", [m.ownerUserId]); saveAndRender();
@@ -2688,6 +2819,7 @@
       recordLogin(user);
       persist();
       render();
+      runTelegramAutomations();
     }
 
     function recordLogin(user) {
