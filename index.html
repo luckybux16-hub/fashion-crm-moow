@@ -174,6 +174,7 @@
     .model-card.deadline-warn { background: #fff9eb; border-color: rgba(184, 117, 18, .38); }
     .model-card.deadline-danger { background: #fff0ee; border-color: rgba(183, 71, 66, .35); }
     .model-card strong { font-size: 16px; overflow-wrap: anywhere; }
+    .photo-frame { position: relative; display: block; width: 100%; }
     .model-photo {
       width: 100%;
       aspect-ratio: 2 / 3;
@@ -181,7 +182,7 @@
       border-radius: 8px;
       border: 1px solid var(--line);
       background: var(--soft);
-      cursor: zoom-in;
+      display: block;
     }
     .model-photo-placeholder {
       width: 100%;
@@ -195,6 +196,28 @@
       font-size: 13px;
       font-weight: 750;
     }
+    .photo-open-control {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      width: 34px;
+      height: 34px;
+      min-height: 34px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px solid rgba(34, 34, 34, .18);
+      background: rgba(255, 255, 255, .92);
+      color: var(--ink);
+      box-shadow: 0 8px 18px rgba(34,34,34,.14);
+      font-size: 22px;
+      line-height: 1;
+      font-weight: 800;
+      cursor: zoom-in;
+    }
+    .photo-open-control:hover { background: #fff; transform: translateY(-1px); }
     .pill {
       display: inline-flex;
       align-items: center;
@@ -275,7 +298,7 @@
       border-radius: 8px;
       border: 1px solid var(--line);
       background: var(--soft);
-      cursor: zoom-in;
+      display: block;
     }
     .file-button {
       display: inline-flex;
@@ -410,6 +433,7 @@
       h2 { font-size: 21px; }
       h3 { font-size: 15px; }
       button, .file-button { width: 100%; min-height: 42px; }
+      .photo-open-control { width: 34px; min-height: 34px; }
       .login-screen { padding: 12px; place-items: start center; }
       .login-card, .quick-logins { grid-template-columns: 1fr; }
       .login-brand { min-height: 300px; }
@@ -2590,10 +2614,10 @@
     }
 
     function bindPhotoOpeners() {
-      document.querySelectorAll("[data-photo-model]").forEach(photo => {
+      document.querySelectorAll("[data-photo-open]").forEach(photo => {
         photo.onclick = event => {
           event.stopPropagation();
-          const model = state.models.find(m => m.id === photo.dataset.photoModel);
+          const model = state.models.find(m => m.id === photo.dataset.photoOpen);
           openPhotoModal(model?.photoDataUrl);
         };
       });
@@ -2688,12 +2712,22 @@
     document.getElementById("logoutButton").onclick = () => { state.currentUserId = ""; state.activeModelId = ""; persist(); render(); };
 
     function modelPhotoThumb(m) {
-      if (m.photoDataUrl) return `<img class="model-photo" src="${escapeAttr(m.photoDataUrl)}" data-photo-model="${escapeAttr(m.id)}" alt="Фото модели">`;
+      if (m.photoDataUrl) return `
+        <span class="photo-frame">
+          <img class="model-photo" src="${escapeAttr(m.photoDataUrl)}" alt="Фото модели">
+          <span class="photo-open-control" data-photo-open="${escapeAttr(m.id)}" title="Открыть фото">+</span>
+        </span>
+      `;
       return `<div class="model-photo-placeholder">Без фото</div>`;
     }
     function modelPhotoSection(m) {
       const preview = m.photoDataUrl
-        ? `<img class="photo-preview" src="${escapeAttr(m.photoDataUrl)}" data-photo-model="${escapeAttr(m.id)}" alt="Фото модели">`
+        ? `
+          <span class="photo-frame">
+            <img class="photo-preview" src="${escapeAttr(m.photoDataUrl)}" alt="Фото модели">
+            <button class="photo-open-control" data-photo-open="${escapeAttr(m.id)}" title="Открыть фото" type="button">+</button>
+          </span>
+        `
         : `<div class="model-photo-placeholder">Фото не загружено</div>`;
       return `
         <div class="primary-photo-block">
