@@ -576,6 +576,9 @@
     let remoteUpdatedAt = "";
     let lastCloudBackupAt = 0;
     let cloudBackupsRequested = false;
+    let localChangedBeforeRemoteLoad = false;
+    let remoteSaveInProgress = false;
+    let remoteSaveQueued = false;
     let accessDraft = null;
     const cloudBackupIntervalMs = 120000;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
@@ -746,7 +749,9 @@
         const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data,updated_at");
         if (Array.isArray(rows) && rows[0]?.data) {
           backupSharedState(preRemoteBackupKey, "Локальная копия до загрузки Supabase");
-          state = normalizeStateData({ ...structuredClone(seed), ...rows[0].data, ...localUiState() });
+          const remoteState = normalizeStateData({ ...structuredClone(seed), ...rows[0].data });
+          const shared = localChangedBeforeRemoteLoad ? mergeSharedData(remoteState, state) : remoteState;
+          state = normalizeStateData({ ...structuredClone(seed), ...shared, ...localUiState() });
           remoteUpdatedAt = rows[0].updated_at || "";
           localStorage.setItem(storeKey, JSON.stringify(state));
         } else {
@@ -756,6 +761,10 @@
         remoteLoaded = true;
         remoteError = "";
         state.syncConflict = false;
+        if (localChangedBeforeRemoteLoad) {
+          localChangedBeforeRemoteLoad = false;
+          queueRemoteSave();
+        }
         render();
       } catch (error) {
         remoteReady = false;
@@ -768,6 +777,7 @@
 
     function persist() {
       localStorage.setItem(storeKey, JSON.stringify(state));
+      if (hasSupabase() && !remoteLoaded) localChangedBeforeRemoteLoad = true;
       if (remoteReady && remoteLoaded) queueRemoteSave();
     }
 
@@ -785,19 +795,38 @@
 
     async function saveRemoteNow() {
       if (!hasSupabase()) return;
-      await ensureNoRemoteConflict();
-      backupSharedState(`${storeKey}-last-cloud-save`, "Копия перед записью в Supabase");
-      await createCloudBackup("Автокопия перед записью в Supabase").catch(error => console.warn("Cloud backup failed", error));
-      const rows = await supabaseRequest("/rest/v1/crm_state?on_conflict=id&select=updated_at", {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-        body: JSON.stringify({ id: "main", data: sharedState(), updated_at: new Date().toISOString() })
-      });
-      remoteUpdatedAt = Array.isArray(rows) ? rows[0]?.updated_at || remoteUpdatedAt : remoteUpdatedAt;
-      remoteReady = true;
-      remoteLoaded = true;
-      state.syncConflict = false;
-      localStorage.setItem(storeKey, JSON.stringify(state));
+      if (remoteSaveInProgress) {
+        remoteSaveQueued = true;
+        return;
+      }
+      remoteSaveInProgress = true;
+      try {
+        await ensureNoRemoteConflict();
+        backupSharedState(`${storeKey}-last-cloud-save`, "Копия перед записью в Supabase");
+        const dataToSave = sharedState();
+        const rows = await supabaseRequest("/rest/v1/crm_state?on_conflict=id&select=updated_at", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+          body: JSON.stringify({ id: "main", data: dataToSave, updated_at: new Date().toISOString() })
+        });
+        remoteUpdatedAt = Array.isArray(rows) ? rows[0]?.updated_at || remoteUpdatedAt : remoteUpdatedAt;
+        remoteReady = true;
+        remoteLoaded = true;
+        remoteError = "";
+        state.syncConflict = false;
+        localStorage.setItem(storeKey, JSON.stringify(state));
+        createCloudBackup("Автокопия текущей версии CRM", { data: dataToSave }).catch(error => {
+          state.cloudBackupError = "Автокопия не создалась. Проверьте таблицу crm_backups в Supabase.";
+          localStorage.setItem(storeKey, JSON.stringify(state));
+          console.warn("Cloud backup failed", error);
+        });
+      } finally {
+        remoteSaveInProgress = false;
+        if (remoteSaveQueued) {
+          remoteSaveQueued = false;
+          queueRemoteSave();
+        }
+      }
     }
 
     async function ensureNoRemoteConflict() {
@@ -842,6 +871,8 @@
         body: JSON.stringify({ reason, data })
       });
       lastCloudBackupAt = now;
+      state.cloudBackupError = "";
+      localStorage.setItem(storeKey, JSON.stringify(state));
       pruneCloudBackups().catch(error => console.warn("Cloud backup prune failed", error));
       return true;
     }
@@ -891,6 +922,29 @@
       };
     }
 
+    function mergeSharedData(remoteData, localData) {
+      const localModels = localData.models || [];
+      const remoteModels = remoteData.models || [];
+      const modelsById = new Map(remoteModels.map(model => [model.id, model]));
+      localModels.forEach(model => {
+        const remoteModel = modelsById.get(model.id);
+        if (!remoteModel || model.status === "Черновик") modelsById.set(model.id, model);
+      });
+      const usersById = new Map((remoteData.users || []).map(user => [user.id, user]));
+      (localData.users || []).forEach(user => {
+        if (!usersById.has(user.id)) usersById.set(user.id, user);
+      });
+      const loginEventsById = new Map();
+      [...(localData.loginEvents || []), ...(remoteData.loginEvents || [])].forEach(event => {
+        if (event?.id && !loginEventsById.has(event.id)) loginEventsById.set(event.id, event);
+      });
+      return {
+        users: Array.from(usersById.values()),
+        models: Array.from(modelsById.values()).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))),
+        loginEvents: Array.from(loginEventsById.values()).sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 200)
+      };
+    }
+
     function backupSharedState(key, reason) {
       try {
         localStorage.setItem(key, JSON.stringify({
@@ -915,7 +969,7 @@
       return true;
     }
 
-    persist();
+    localStorage.setItem(storeKey, JSON.stringify(state));
     function currentUser() { return state.users.find(u => u.id === state.currentUserId) || null; }
     function currentModel() { return state.models.find(m => m.id === state.activeModelId) || null; }
     function userName(id) { return state.users.find(u => u.id === id)?.name || "Не назначен"; }
@@ -1661,7 +1715,7 @@
           </div>
           <div class="mini-block">
             <span class="mini-title">Облачные копии Supabase</span>
-            <p class="muted">CRM автоматически сохраняет предыдущую облачную версию перед записью новых данных. Хранятся последние 20 копий.</p>
+            <p class="muted">CRM автоматически сохраняет текущую версию после успешной записи в Supabase. Хранятся последние 20 копий.</p>
             <div class="actions">
               <button id="refreshCloudBackups">Обновить список</button>
               <button id="makeCloudBackup">Создать облачную копию сейчас</button>
