@@ -751,7 +751,12 @@
         model.brand = model.brand || "Не определились";
         model.photoDataUrl = model.photoDataUrl || "";
         (model.samples || []).forEach(s => s.usedHardware = s.usedHardware || "");
-        (model.corrections || []).forEach(c => c.printCost = Number(c.printCost || 0));
+        (model.corrections || []).forEach(c => {
+          c.printCost = Number(c.paperCost ?? c.printCost ?? 0);
+          c.paperCost = c.printCost;
+          c.paperPaid = !!c.paperPaid;
+          c.paperPaidAt = c.paperPaidAt || "";
+        });
       });
       cleanupTechnicalHistory(data);
       return data;
@@ -1211,7 +1216,7 @@
     }
 
     function correctionPrintTotal(model) {
-      return (model.corrections || []).reduce((sum, c) => sum + Number(c.printCost || 0), 0);
+      return (model.corrections || []).reduce((sum, c) => sum + Number(c.paperCost ?? c.printCost ?? 0), 0);
     }
 
     function statusClass(status) {
@@ -1790,11 +1795,12 @@
           <h3>Оплата конструктора</h3>
           <div class="pay-summary">
             ${stat(money(patternTotal), "лекала")}
-            ${stat(money(printTotal), "печать")}
+            ${stat(money(printTotal), "за бумагу")}
             ${stat(money(gradingTotal), "градация")}
             ${stat(money(total), "общая сумма", "total")}
           </div>
           ${m.payments.constructor.map((p, index) => payRow(p, "constructor", index)).join("")}
+          ${m.corrections.filter(c => Number(c.paperCost ?? c.printCost ?? 0) > 0).map((c, index) => paperPayRow(c, index)).join("")}
         </section>
       `;
     }
@@ -2082,11 +2088,17 @@
         if (!canPay()) return;
         const [type, index] = btn.dataset.pay.split(":");
         const m = currentModel();
-        const item = type === "constructor" ? m.payments.constructor[Number(index)] : m.samples.filter(s => s.readyAt)[Number(index)];
-        if (item.paid) return;
-        item.paid = true;
-        item.paidAt = today();
-        addHistory(m, `Оплачено: ${type === "constructor" ? item.work : "Образец " + item.number}`);
+        const item = type === "constructor" ? m.payments.constructor[Number(index)] : type === "paper" ? m.corrections.filter(c => Number(c.paperCost ?? c.printCost ?? 0) > 0)[Number(index)] : m.samples.filter(s => s.readyAt)[Number(index)];
+        if (!item || (type === "paper" ? item.paperPaid : item.paid)) return;
+        if (type === "paper") {
+          if (item.paperPaid) return;
+          item.paperPaid = true;
+          item.paperPaidAt = today();
+        } else {
+          item.paid = true;
+          item.paidAt = today();
+        }
+        addHistory(m, `Оплачено: ${type === "constructor" ? item.work : type === "paper" ? "За бумагу по корректировкам " + item.number : "Образец " + item.number}`);
         persist();
         render();
       });
@@ -2620,8 +2632,8 @@
         "take-correction": () => askDeadline(`Дата сдачи корректировок ${n}`, date => {
           const c = currentCorrection(m); c.status = `Корректировки ${c.number} в работе`; c.acceptedAt = today(); c.deadline = date; changeStatus(m, c.status, `Конструктор взял в работу корректировки ${c.number}`); m.deadline = date; notifyMovement(m, `Конструктор взял в работу корректировки ${c.number}`, [m.ownerUserId]); saveAndRender();
         }),
-        "correction-ready": () => checklistModal(`Корректировки ${n} готовы`, checklistFields(m), [{ id: "printCost", label: "Сумма за печать", type: "number", required: true }], data => {
-          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); changeStatus(m, c.status, `Корректировки ${c.number} готовы`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, `Корректировки ${c.number} готовы, требуется действие владельца`, [m.ownerUserId]); saveAndRender();
+        "correction-ready": () => checklistModal(`Корректировки ${n} готовы`, checklistFields(m), [{ id: "printCost", label: "Сумма за бумагу", type: "number", required: true }], data => {
+          const c = currentCorrection(m); c.status = `Корректировки ${c.number} готовы`; c.readyAt = today(); c.checklist = pickChecklist(data); c.printCost = Number(data.printCost || 0); c.paperCost = c.printCost; c.paperPaid = !!c.paperPaid; c.paperPaidAt = c.paperPaidAt || ""; changeStatus(m, c.status, `Корректировки ${c.number} готовы`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, `Корректировки ${c.number} готовы, требуется действие владельца`, [m.ownerUserId]); saveAndRender();
         }),
         "send-grading": () => formModal("Подать на градацию", [
           { id: "finalName", label: "Финальное название модели", type: "text", required: true, value: m.title },
@@ -2941,6 +2953,10 @@
     }
     function payRow(p, type, index) {
       return `<div class="table-row"><strong>${escapeHtml(p.work)}</strong><span>${money(p.amount)}</span><span>${p.paid ? "Оплачено" : "Не оплачено"}</span><span>${p.paidAt || "-"}</span>${canPay() && !p.paid ? `<button data-pay="${type}:${index}">Оплачено</button>` : `<span></span>`}</div>`;
+    }
+    function paperPayRow(c, index) {
+      const amount = Number(c.paperCost ?? c.printCost ?? 0);
+      return `<div class="table-row"><strong>За бумагу · корректировки ${c.number}</strong><span>${money(amount)}</span><span>${c.paperPaid ? "Оплачено" : "Не оплачено"}</span><span>${c.paperPaidAt || "-"}</span>${canPay() && !c.paperPaid ? `<button data-pay="paper:${index}">Оплачено</button>` : `<span></span>`}</div>`;
     }
     function samplePayRow(s, index) {
       return `<div class="table-row workshop-pay-row"><strong>Образец ${s.number}</strong><span>${money(s.cost)}</span><span>${s.fabricUsage || 0} м</span><span>${escapeHtml(s.usedHardware || "-")}</span><span>${s.paid ? "Оплачено " + s.paidAt : "Не оплачено"}</span>${canPay() && !s.paid ? `<button data-pay="workshop:${index}">Оплачено</button>` : `<span></span>`}</div>`;
