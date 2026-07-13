@@ -2821,9 +2821,10 @@
 
     function imageToCompressedDataUrl(img) {
       const attempts = [
-        { maxSide: 1000, quality: 0.78 },
-        { maxSide: 820, quality: 0.72 },
-        { maxSide: 640, quality: 0.68 }
+        { maxSide: 900, quality: 0.74 },
+        { maxSide: 700, quality: 0.68 },
+        { maxSide: 520, quality: 0.62 },
+        { maxSide: 420, quality: 0.58 }
       ];
       let lastDataUrl = "";
       for (const attempt of attempts) {
@@ -2832,31 +2833,42 @@
         canvas.width = Math.max(1, Math.round(img.width * scale));
         canvas.height = Math.max(1, Math.round(img.height * scale));
         const ctx = canvas.getContext("2d", { alpha: false });
+        if (!ctx) throw new Error("Планшет не смог подготовить фото");
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         lastDataUrl = canvas.toDataURL("image/jpeg", attempt.quality);
-        if (lastDataUrl.length < 1800000) return lastDataUrl;
+        if (lastDataUrl.length < 1300000) return lastDataUrl;
       }
       return lastDataUrl;
+    }
+
+    async function preparePhotoDataUrl(file) {
+      const dataUrl = await readFileAsDataUrl(file);
+      const originalCanBeSaved = /^image\/(jpeg|jpg|png|webp)$/i.test(file.type || "") && dataUrl.length < 1300000;
+      if (originalCanBeSaved) return dataUrl;
+      try {
+        const img = await loadImageFromSource(dataUrl);
+        return imageToCompressedDataUrl(img);
+      } catch (error) {
+        const objectUrl = URL.createObjectURL(file);
+        try {
+          const img = await loadImageFromSource(objectUrl);
+          return imageToCompressedDataUrl(img);
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      }
     }
 
     async function handleModelPhotoUpload(event) {
       const file = event.target.files?.[0];
       if (!file) return;
-      const isImage = file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name || "");
+      const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name || "") || !file.type;
       if (!isImage) return alert("Выберите файл изображения");
       setPhotoUploadHint("Фото загружается и сжимается...");
-      const objectUrl = URL.createObjectURL(file);
       try {
-        let img;
-        try {
-          img = await loadImageFromSource(objectUrl);
-        } catch (error) {
-          const dataUrl = await readFileAsDataUrl(file);
-          img = await loadImageFromSource(dataUrl);
-        }
-        const compressed = imageToCompressedDataUrl(img);
+        const compressed = await preparePhotoDataUrl(file);
         if (!compressed || compressed.length > 2600000) {
           throw new Error("Слишком большое фото");
         }
@@ -2867,10 +2879,10 @@
         render();
       } catch (error) {
         console.warn("Photo upload failed", error);
-        setPhotoUploadHint("Не удалось загрузить это фото. Попробуйте выбрать JPEG/PNG или сделать скриншот фото и загрузить его.", true);
-        alert("Не удалось загрузить фото. Попробуйте JPEG/PNG или скриншот этого фото.");
+        const message = "Не удалось загрузить это фото. На планшете откройте фото, сделайте скриншот и загрузите скриншот.";
+        setPhotoUploadHint(message, true);
+        alert(message);
       } finally {
-        URL.revokeObjectURL(objectUrl);
         event.target.value = "";
       }
     }
