@@ -292,6 +292,13 @@
     .primary-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: stretch; }
     .primary-fields { display: grid; gap: 12px; }
     .primary-photo-block { display: grid; gap: 10px; align-content: start; }
+    .photo-upload-hint {
+      min-height: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .photo-upload-hint.error { color: var(--danger); }
     .photo-preview {
       width: 100%;
       aspect-ratio: 2 / 3;
@@ -2787,32 +2794,85 @@
       render();
     }
 
-    function handleModelPhotoUpload(event) {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      if (!file.type.startsWith("image/")) return alert("Выберите файл изображения");
-      const img = new Image();
-      const objectUrl = URL.createObjectURL(file);
-      img.onload = () => {
-        const maxSide = 1200;
-        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+    function setPhotoUploadHint(text, isError = false) {
+      const hint = document.getElementById("photoUploadHint");
+      if (!hint) return;
+      hint.textContent = text || "";
+      hint.classList.toggle("error", !!isError);
+    }
+
+    function loadImageFromSource(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+      });
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function imageToCompressedDataUrl(img) {
+      const attempts = [
+        { maxSide: 1000, quality: 0.78 },
+        { maxSide: 820, quality: 0.72 },
+        { maxSide: 640, quality: 0.68 }
+      ];
+      let lastDataUrl = "";
+      for (const attempt of attempts) {
+        const scale = Math.min(1, attempt.maxSide / Math.max(img.width, img.height));
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(img.width * scale));
         canvas.height = Math.max(1, Math.round(img.height * scale));
-        const ctx = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d", { alpha: false });
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        lastDataUrl = canvas.toDataURL("image/jpeg", attempt.quality);
+        if (lastDataUrl.length < 1800000) return lastDataUrl;
+      }
+      return lastDataUrl;
+    }
+
+    async function handleModelPhotoUpload(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const isImage = file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name || "");
+      if (!isImage) return alert("Выберите файл изображения");
+      setPhotoUploadHint("Фото загружается и сжимается...");
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        let img;
+        try {
+          img = await loadImageFromSource(objectUrl);
+        } catch (error) {
+          const dataUrl = await readFileAsDataUrl(file);
+          img = await loadImageFromSource(dataUrl);
+        }
+        const compressed = imageToCompressedDataUrl(img);
+        if (!compressed || compressed.length > 2600000) {
+          throw new Error("Слишком большое фото");
+        }
         const m = currentModel();
-        m.photoDataUrl = canvas.toDataURL("image/jpeg", 0.86);
+        m.photoDataUrl = compressed;
         addHistory(m, "Обновлено фото модели");
-        URL.revokeObjectURL(objectUrl);
         markModelUnsaved(m);
         render();
-      };
-      img.onerror = () => {
+      } catch (error) {
+        console.warn("Photo upload failed", error);
+        setPhotoUploadHint("Не удалось загрузить это фото. Попробуйте выбрать JPEG/PNG или сделать скриншот фото и загрузить его.", true);
+        alert("Не удалось загрузить фото. Попробуйте JPEG/PNG или скриншот этого фото.");
+      } finally {
         URL.revokeObjectURL(objectUrl);
-        alert("Не удалось загрузить изображение");
-      };
-      img.src = objectUrl;
+        event.target.value = "";
+      }
     }
 
     function bindPhotoOpeners() {
@@ -2939,10 +2999,11 @@
             <div class="actions">
               <label class="file-button">
                 <span>${m.photoDataUrl ? "Заменить фото" : "Загрузить фото"}</span>
-                <input id="modelPhotoInput" type="file" accept="image/*">
+                <input id="modelPhotoInput" type="file" accept="image/*,.heic,.heif">
               </label>
               ${m.photoDataUrl ? `<button id="removeModelPhoto" class="danger">Удалить фото</button>` : ""}
             </div>
+            <div id="photoUploadHint" class="photo-upload-hint"></div>
           ` : ""}
         </div>
       `;
