@@ -156,8 +156,9 @@
     .span-4 { grid-column: span 4; }
 
     .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .stat-grid + .stat-grid { margin-top: 12px; }
     .stat { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-height: 82px; }
-    .stat strong { display: block; font-size: 26px; line-height: 1.1; margin-bottom: 6px; }
+    .stat strong { display: block; font-size: 26px; line-height: 1.1; margin-bottom: 6px; overflow-wrap: anywhere; }
     .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     .model-card {
       text-align: left;
@@ -1454,6 +1455,11 @@
     function globalStatsView() {
       if (!canViewGlobalStats()) return `<section class="panel"><div class="empty">Нет доступа</div></section>`;
       const models = modelsForStatsPeriod();
+      const allPeriodModels = modelsForStatsPeriod(true);
+      const inWork = allPeriodModels.filter(m => !isDeleted(m) && inProcess(m));
+      const released = allPeriodModels.filter(m => m.status === "Завершено");
+      const deleted = allPeriodModels.filter(isDeleted);
+      const heaviest = heaviestModel(allPeriodModels);
       const constructorTotal = models.reduce((sum, m) => sum + constructorCostTotal(m), 0);
       const workshopTotal = models.reduce((sum, m) => sum + m.samples.filter(s => s.readyAt).reduce((s, sample) => s + Number(sample.cost || 0), 0), 0);
       const fabricTotal = models.reduce((sum, m) => sum + fabricCostTotal(m), 0);
@@ -1477,6 +1483,12 @@
             ${stat(money(fabricTotal), "общая стоимость ткани")}
             ${stat(money(totalSpent), "общая сумма за всё", "total")}
           </div>
+          <div class="stat-grid">
+            ${stat(inWork.length, "моделей в процессе")}
+            ${stat(released.length, "выпущено моделей")}
+            ${stat(deleted.length, "удалено из разработки")}
+            ${stat(heaviest ? modelLine(heaviest) : "-", "самая тяжелая модель")}
+          </div>
         </section>
         <section class="panel">
           <h3>Модели за период</h3>
@@ -1485,12 +1497,23 @@
       `;
     }
 
-    function modelsForStatsPeriod() {
-      if (state.statsPeriod === "all") return state.models.filter(m => !isDeleted(m));
+    function modelsForStatsPeriod(includeDeleted = false) {
+      const visible = includeDeleted ? state.models : state.models.filter(m => !isDeleted(m));
+      if (state.statsPeriod === "all") return visible;
       const days = state.statsPeriod === "week" ? 7 : 30;
       const from = new Date();
       from.setDate(from.getDate() - days);
-      return state.models.filter(m => !isDeleted(m) && new Date(m.createdAt) >= from);
+      return visible.filter(m => new Date(m.createdAt) >= from);
+    }
+
+    function heaviestModel(models) {
+      const active = models.filter(m => !isDeleted(m));
+      if (!active.length) return null;
+      return active.reduce((best, model) => {
+        const score = (model.samples || []).length + (model.corrections || []).length;
+        const bestScore = best ? (best.samples || []).length + (best.corrections || []).length : -1;
+        return score > bestScore ? model : best;
+      }, null);
     }
 
     function accessView() {
