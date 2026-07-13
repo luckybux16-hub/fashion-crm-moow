@@ -336,8 +336,10 @@
     .chat { display: grid; gap: 10px; max-width: 850px; }
     .comment { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; display: grid; gap: 8px; }
     .comment-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; font-weight: 700; }
-    .table-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr auto; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
-    .table-row.workshop-pay-row { grid-template-columns: 1.1fr .8fr .8fr 1.2fr 1fr auto; }
+    .table-row { display: grid; grid-template-columns: minmax(260px, 1.4fr) minmax(130px, .75fr) minmax(150px, .8fr) minmax(130px, .75fr) 154px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
+    .table-row.workshop-pay-row { grid-template-columns: minmax(180px, 1.1fr) minmax(100px, .7fr) minmax(90px, .6fr) minmax(170px, 1fr) minmax(150px, .8fr) 154px; }
+    .table-row-action { min-height: 40px; display: flex; justify-content: flex-end; align-items: center; }
+    .table-row-action button { width: 100%; }
     .history-row { display: grid; grid-template-columns: 150px 1fr 160px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .history-row small { display: block; color: var(--muted); font-size: 12px; font-weight: 650; margin-top: 4px; overflow-wrap: anywhere; }
     .access-row { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr 1fr 1fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
@@ -530,6 +532,7 @@
       }
       .table-row button,
       .access-row button { width: 100%; }
+      .table-row-action { justify-content: stretch; min-height: 0; }
       .stat { min-height: 72px; padding: 12px; }
       .stat strong { font-size: 22px; }
       .modal-backdrop {
@@ -2952,14 +2955,14 @@
       return `<div class="mini-block"><span class="mini-title">Проверочный чек-лист</span><div class="check-row">${items.map(([label, checked]) => checkView(label, checked)).join("")}</div></div>`;
     }
     function payRow(p, type, index) {
-      return `<div class="table-row"><strong>${escapeHtml(p.work)}</strong><span>${money(p.amount)}</span><span>${p.paid ? "Оплачено" : "Не оплачено"}</span><span>${p.paidAt || "-"}</span>${canPay() && !p.paid ? `<button data-pay="${type}:${index}">Оплачено</button>` : `<span></span>`}</div>`;
+      return `<div class="table-row"><strong>${escapeHtml(p.work)}</strong><span>${money(p.amount)}</span><span>${p.paid ? "Оплачено" : "Не оплачено"}</span><span>${p.paidAt || "-"}</span><span class="table-row-action">${canPay() && !p.paid ? `<button data-pay="${type}:${index}">Оплачено</button>` : ""}</span></div>`;
     }
     function paperPayRow(c, index) {
       const amount = Number(c.paperCost ?? c.printCost ?? 0);
-      return `<div class="table-row"><strong>За бумагу · корректировки ${c.number}</strong><span>${money(amount)}</span><span>${c.paperPaid ? "Оплачено" : "Не оплачено"}</span><span>${c.paperPaidAt || "-"}</span>${canPay() && !c.paperPaid ? `<button data-pay="paper:${index}">Оплачено</button>` : `<span></span>`}</div>`;
+      return `<div class="table-row"><strong>За бумагу · корректировки ${c.number}</strong><span>${money(amount)}</span><span>${c.paperPaid ? "Оплачено" : "Не оплачено"}</span><span>${c.paperPaidAt || "-"}</span><span class="table-row-action">${canPay() && !c.paperPaid ? `<button data-pay="paper:${index}">Оплачено</button>` : ""}</span></div>`;
     }
     function samplePayRow(s, index) {
-      return `<div class="table-row workshop-pay-row"><strong>Образец ${s.number}</strong><span>${money(s.cost)}</span><span>${s.fabricUsage || 0} м</span><span>${escapeHtml(s.usedHardware || "-")}</span><span>${s.paid ? "Оплачено " + s.paidAt : "Не оплачено"}</span>${canPay() && !s.paid ? `<button data-pay="workshop:${index}">Оплачено</button>` : `<span></span>`}</div>`;
+      return `<div class="table-row workshop-pay-row"><strong>Образец ${s.number}</strong><span>${money(s.cost)}</span><span>${s.fabricUsage || 0} м</span><span>${escapeHtml(s.usedHardware || "-")}</span><span>${s.paid ? "Оплачено " + s.paidAt : "Не оплачено"}</span><span class="table-row-action">${canPay() && !s.paid ? `<button data-pay="workshop:${index}">Оплачено</button>` : ""}</span></div>`;
     }
     function stat(value, label, cls = "") { return `<div class="stat ${cls}"><strong>${escapeHtml(String(value))}</strong><span class="muted">${label}</span></div>`; }
     function labelFor(key) { return ({ brand: "Бренд", title: "Название", article: "Артикул", sizeRange: "Размерный ряд", material: "Материал", hardware: "Фурнитура", description: "Описание", important: "Важные детали", gradingComment: "Комментарий по градации", constructorUserId: "Конструктор", workshopUserId: "Цех" })[key] || key; }
