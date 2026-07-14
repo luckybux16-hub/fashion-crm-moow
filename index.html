@@ -799,10 +799,22 @@
         ...(options.headers || {})
       };
       const response = await fetch(`${supabaseConfig.url.replace(/\/$/, "")}${path}`, { ...options, headers });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        const detail = await response.text();
+        const error = new Error(`Supabase ${response.status}: ${detail || response.statusText}`);
+        error.status = response.status;
+        throw error;
+      }
       if (response.status === 204) return null;
       const text = await response.text();
       return text ? JSON.parse(text) : null;
+    }
+
+    function supabaseErrorLabel(error) {
+      if (error?.status) return `Supabase ${error.status}`;
+      const message = String(error?.message || "");
+      if (message.includes("Failed to fetch")) return "Supabase: сеть";
+      return "Supabase недоступен";
     }
 
     async function initRemoteState() {
@@ -829,7 +841,7 @@
       } catch (error) {
         remoteReady = false;
         remoteLoaded = false;
-        remoteError = "Supabase недоступен";
+        remoteError = supabaseErrorLabel(error);
         console.warn("Supabase sync failed", error);
         render();
       }
