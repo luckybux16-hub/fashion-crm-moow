@@ -2434,10 +2434,10 @@
       const dueTomorrow = active.filter(m => m.deadline && daysUntil(m.deadline) === 1);
       const lines = [
         "Ежедневная сводка CRM",
-        `В работе: ${active.length}`,
-        `Просрочено: ${overdue.length}`,
-        `Сдать сегодня: ${dueToday.length}`,
-        `Дедлайн завтра: ${dueTomorrow.length}`,
+        telegramField("В работе", active.length),
+        telegramField("Просрочено", overdue.length),
+        telegramField("Сдать сегодня", dueToday.length),
+        telegramField("Дедлайн завтра", dueTomorrow.length),
         "",
         ...digestModelLines("Просрочено", overdue),
         ...digestModelLines("Сегодня", dueToday),
@@ -2450,7 +2450,7 @@
 
     function digestModelLines(title, models) {
       if (!models.length) return [];
-      return [title + ":", ...models.slice(0, 8).map(m => `- ${modelLine(m)} · ${m.status} · ${userName(m.currentResponsibleUserId)}`)];
+      return [`<b>${telegramEscape(title)}:</b>`, ...models.slice(0, 8).map(m => `- ${telegramEscape(modelLine(m))} · ${telegramEscape(m.status)} · ${telegramEscape(userName(m.currentResponsibleUserId))}`)];
     }
 
     function daysUntil(dateValue) {
@@ -2519,16 +2519,42 @@
       return `${location.origin}${location.pathname}#model=${encodeURIComponent(model.id)}`;
     }
 
+    function telegramEscape(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+    }
+
+    function telegramField(label, value) {
+      const displayValue = value === undefined || value === null || value === "" ? "-" : value;
+      return `<b>${telegramEscape(label)}:</b> ${telegramEscape(displayValue)}`;
+    }
+
+    function telegramExtraLine(line) {
+      const text = String(line || "").trim();
+      if (!text) return null;
+      const index = text.indexOf(":");
+      if (index < 1) return telegramEscape(text);
+      return telegramField(text.slice(0, index), text.slice(index + 1).trim());
+    }
+
+    function isTelegramSeparatedLine(line) {
+      return /^(Комментарий|Текст корректировок|Ссылка|Открыть заявку)/i.test(String(line || "").trim());
+    }
+
+    function pushTelegramLine(lines, line, separated = false) {
+      if (!line) return;
+      if (separated && lines.length && lines[lines.length - 1] !== "") lines.push("");
+      lines.push(line);
+      if (separated) lines.push("");
+    }
+
     function taskNotification(model, title, extra = []) {
-      const lines = [
-        title,
-        `Модель: ${modelLine(model)}`,
-        `Статус: ${model.status}`,
-        `Дедлайн: ${model.deadline || "не задан"}`,
-        ...extra.filter(Boolean),
-        `Открыть заявку: ${modelUrl(model)}`
-      ];
-      return lines.join("\n");
+      const lines = [telegramEscape(title), ""];
+      pushTelegramLine(lines, telegramField("Модель", modelLine(model)), true);
+      pushTelegramLine(lines, telegramField("Статус", model.status), true);
+      if (model.deadline) pushTelegramLine(lines, telegramField("Дедлайн", model.deadline), true);
+      extra.filter(Boolean).forEach(item => pushTelegramLine(lines, telegramExtraLine(item), isTelegramSeparatedLine(item)));
+      pushTelegramLine(lines, telegramField("Открыть заявку", modelUrl(model)), true);
+      return lines.filter((line, index, list) => line !== "" || (list[index - 1] !== "" && index !== list.length - 1)).join("\n");
     }
 
     function taskContext(model, type) {
@@ -2740,7 +2766,7 @@
           m.grading.checklist = { notches: true, printDetails: true, nameUpdated: true, sentTelegram: true }; m.grading.cost = Number(data.cost); m.grading.readyAt = today();
           m.payments.constructor[1].amount = Number(data.cost); changeStatus(m, "Градация готова", "Градация готова"); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, "Градация готова, требуется действие владельца", [m.ownerUserId]); saveAndRender();
         }),
-        "finish-model": () => { changeStatus(m, "Завершено", "Модель завершена"); m.deadline = ""; notifyUsers([...m.participants, ...adminUserIds()], `Модель завершена\nМодель: ${modelLine(m)}`); saveAndRender(); }
+        "finish-model": () => { changeStatus(m, "Завершено", "Модель завершена"); m.deadline = ""; notifyUsers([...m.participants, ...adminUserIds()], taskNotification(m, "Модель завершена")); saveAndRender(); }
       };
       actions[action]?.();
     }
@@ -2844,7 +2870,17 @@
       const notify = [...new Set([...m.participants, ...state.users.filter(u => isAdminRole(u.role)).map(u => u.id)])].filter(id => id !== currentUser().id);
       notify.forEach(id => m.unread[id] = Number(m.unread[id] || 0) + 1);
       addHistory(m, "Добавлен комментарий");
-      notifyUsers(notify, `Новый комментарий в CRM\nМодель: ${modelLine(m)}\nАвтор: ${currentUser().name}\n${text}`);
+      notifyUsers(notify, [
+        "Новый комментарий в CRM",
+        "",
+        telegramField("Модель", modelLine(m)),
+        "",
+        telegramField("Автор", currentUser().name),
+        "",
+        telegramField("Комментарий", text),
+        "",
+        telegramField("Открыть заявку", modelUrl(m))
+      ].join("\n"));
       saveAndRender();
     }
 

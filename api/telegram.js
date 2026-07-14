@@ -74,6 +74,7 @@ export default async function handler(request, response) {
       body: JSON.stringify({
         chat_id: safeChatId,
         text: safeText,
+        parse_mode: "HTML",
         disable_web_page_preview: true
       })
     });
