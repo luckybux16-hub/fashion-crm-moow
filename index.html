@@ -812,10 +812,8 @@
         if (Array.isArray(rows) && rows[0]?.data) {
           backupSharedState(preRemoteBackupKey, "Локальная копия до загрузки Supabase");
           const remoteState = normalizeStateData({ ...structuredClone(seed), ...rows[0].data });
-          const remoteShared = pickSharedData(remoteState);
-          const shared = localChangedBeforeRemoteLoad ? mergeSharedData(remoteState, state) : remoteState;
-          state = normalizeStateData({ ...structuredClone(seed), ...shared, ...localUiState() });
-          remoteBaselineShared = localChangedBeforeRemoteLoad ? remoteShared : pickSharedData(state);
+          state = normalizeStateData({ ...structuredClone(seed), ...remoteState, ...localUiState() });
+          remoteBaselineShared = pickSharedData(state);
           remoteUpdatedAt = rows[0].updated_at || "";
           localStorage.setItem(storeKey, JSON.stringify(state));
         } else {
@@ -825,10 +823,7 @@
         remoteLoaded = true;
         remoteError = "";
         state.syncConflict = false;
-        if (localChangedBeforeRemoteLoad) {
-          localChangedBeforeRemoteLoad = false;
-          queueRemoteSave();
-        }
+        localChangedBeforeRemoteLoad = false;
         runTelegramAutomations();
         render();
       } catch (error) {
@@ -842,9 +837,26 @@
 
     function persist() {
       localStorage.setItem(storeKey, JSON.stringify(state));
-      if (hasSupabase() && !remoteLoaded) localChangedBeforeRemoteLoad = true;
       if (unsavedModelIds.size) return;
       if (remoteReady && remoteLoaded) queueRemoteSave();
+    }
+
+    function canWriteSharedData() {
+      return !hasSupabase() || (remoteReady && remoteLoaded && !remoteSaveInProgress);
+    }
+
+    function requireOnlineWrite() {
+      if (canWriteSharedData()) return true;
+      alert("Онлайн-база еще не готова или временно недоступна. Обновите страницу или попробуйте через несколько секунд. Действие не сохранено локально.");
+      return false;
+    }
+
+    async function saveSharedChangesOrThrow() {
+      localStorage.setItem(storeKey, JSON.stringify(state));
+      if (hasSupabase()) {
+        if (!remoteReady || !remoteLoaded) throw new Error("Remote database is not ready");
+        await saveRemoteNow();
+      }
     }
 
     function queueRemoteSave() {
@@ -1149,6 +1161,20 @@
         telegramDigestLog: data.telegramDigestLog || state.telegramDigestLog || []
       });
       persist();
+      return true;
+    }
+
+    function restoreSharedDataLocally(data) {
+      if (!data?.users || !data?.models) return false;
+      state = normalizeStateData({
+        ...state,
+        users: data.users,
+        models: data.models,
+        loginEvents: data.loginEvents || state.loginEvents || [],
+        telegramReminderLog: data.telegramReminderLog || state.telegramReminderLog || [],
+        telegramDigestLog: data.telegramDigestLog || state.telegramDigestLog || []
+      });
+      localStorage.setItem(storeKey, JSON.stringify(state));
       return true;
     }
 
@@ -2060,6 +2086,7 @@
       document.querySelectorAll("[data-tab]").forEach(btn => btn.onclick = () => { state.activeTab = btn.dataset.tab; persist(); render(); });
       document.querySelectorAll("[data-action]").forEach(btn => btn.onclick = () => {
         if (!ensureCurrentModelSaved()) return;
+        if (!requireOnlineWrite()) return;
         runAction(btn.dataset.action);
       });
       const saveChanges = document.getElementById("saveModelChanges");
@@ -2086,7 +2113,10 @@
         };
       });
       const send = document.getElementById("sendComment");
-      if (send) send.onclick = sendComment;
+      if (send) send.onclick = () => {
+        if (!requireOnlineWrite()) return;
+        sendComment();
+      };
       const adminSave = document.getElementById("adminSave");
       if (adminSave) adminSave.onclick = () => {
         if (!ensureCurrentModelSaved()) return;
@@ -2138,8 +2168,9 @@
     }
 
     function bindPayments() {
-      document.querySelectorAll("[data-pay]").forEach(btn => btn.onclick = () => {
+      document.querySelectorAll("[data-pay]").forEach(btn => btn.onclick = async () => {
         if (!ensureCurrentModelSaved()) return;
+        if (!requireOnlineWrite()) return;
         if (!canPay()) return;
         const [type, index] = btn.dataset.pay.split(":");
         const m = currentModel();
@@ -2154,8 +2185,7 @@
           item.paidAt = today();
         }
         addHistory(m, `Оплачено: ${type === "constructor" ? item.work : type === "paper" ? "За бумагу по корректировкам " + item.number : "Образец " + item.number}`);
-        persist();
-        render();
+        await saveAndRender();
       });
     }
 
@@ -2242,13 +2272,13 @@
         render();
       });
       const saveAccess = document.getElementById("saveAccessChanges");
-      if (saveAccess) saveAccess.onclick = () => {
+      if (saveAccess) saveAccess.onclick = async () => {
+        if (!requireOnlineWrite()) return;
         const before = structuredClone(state.users);
         state.users = normalizeUsers(accessDraft);
         accessDraft = structuredClone(state.users);
         addAccessHistory(before, state.users);
-        persist();
-        render();
+        await saveAndRender();
       };
       const cancelAccess = document.getElementById("cancelAccessChanges");
       if (cancelAccess) cancelAccess.onclick = () => {
@@ -2715,17 +2745,42 @@
       actions[action]?.();
     }
 
-    function createModel() {
+    async function createModel() {
+      if (!requireOnlineWrite()) return;
+      const snapshot = pickSharedData(state);
       const model = makeModel({ id: uid(), createdByUserId: currentUser().id, ownerUserId: currentUser().id, currentResponsibleUserId: currentUser().id, participants: [currentUser().id], title: "Новая модель", createdAt: today(), updatedAt: today() });
       state.models.unshift(model);
       state.activeModelId = model.id;
       state.view = "detail";
       state.activeTab = "Основная";
-      persist();
-      render();
+      try {
+        await saveSharedChangesOrThrow();
+        render();
+      } catch (error) {
+        console.warn("Create model failed", error);
+        restoreSharedDataLocally(snapshot);
+        state.activeModelId = "";
+        state.view = "dashboard";
+        alert("Заявка не создана: онлайн-база не приняла запись. Попробуйте еще раз.");
+        render();
+      }
     }
 
-    function saveAndRender() { persist(); render(); }
+    async function saveAndRender() {
+      try {
+        await saveSharedChangesOrThrow();
+        render();
+      } catch (error) {
+        console.warn("Shared save failed", error);
+        remoteReady = false;
+        remoteError = "Не сохранено в Supabase";
+        alert("Изменение не сохранено в онлайн-базу. Сейчас загрузится последняя сохраненная версия CRM.");
+        if (hasSupabase()) {
+          await loadLatestRemoteState().catch(loadError => console.warn("Reload after failed save failed", loadError));
+        }
+        render();
+      }
+    }
     function getCurrentNumber(m) { return Number((m.status.match(/\d+/) || [m.samples.length || m.corrections.length || 1])[0]); }
     function currentSample(m) { const n = getCurrentNumber(m); return m.samples.find(s => s.number === n) || m.samples[m.samples.length - 1]; }
     function currentCorrection(m) { const n = getCurrentNumber(m); return m.corrections.find(c => c.number === n) || m.corrections[m.corrections.length - 1]; }
@@ -2790,8 +2845,7 @@
       notify.forEach(id => m.unread[id] = Number(m.unread[id] || 0) + 1);
       addHistory(m, "Добавлен комментарий");
       notifyUsers(notify, `Новый комментарий в CRM\nМодель: ${modelLine(m)}\nАвтор: ${currentUser().name}\n${text}`);
-      persist();
-      render();
+      saveAndRender();
     }
 
     function setPhotoUploadHint(text, isError = false) {
