@@ -630,8 +630,7 @@
     let remoteSaveQueued = false;
     let remoteBaselineShared = null;
     let accessDraft = null;
-    let initialModelHash = "";
-    let modelHashConsumed = false;
+    let initialRouteConsumed = false;
     const unsavedModelIds = new Set();
     const cloudBackupIntervalMs = 120000;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
@@ -1312,31 +1311,80 @@
     }
 
     function render() {
-      renderShell();
       renderLogin();
-      if (!currentUser()) return;
+      if (!currentUser()) {
+        renderShell();
+        return;
+      }
       applyInitialModelLink();
+      renderShell();
       if (state.view === "detail" && currentModel()) renderDetail();
       else renderHome();
+      syncRoute();
     }
 
-    function requestedModelId() {
-      if (initialModelHash) return initialModelHash;
+    function currentRouteParams() {
       const hash = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
-      initialModelHash = new URLSearchParams(hash).get("model") || "";
-      return initialModelHash;
+      return new URLSearchParams(hash);
     }
 
-    function applyInitialModelLink() {
-      if (modelHashConsumed) return;
-      const id = requestedModelId();
-      if (!id) return;
+    function applyInitialModelLink(force = false) {
+      if (initialRouteConsumed && !force) return;
+      const params = currentRouteParams();
+      const view = params.get("view") || "";
+      const id = params.get("model") || "";
+      const tab = params.get("tab") || "";
+      if (id) {
       const model = state.models.find(m => m.id === id);
-      if (!model || !hasAccess(model)) return;
-      state.activeModelId = model.id;
-      state.view = "detail";
-      state.activeTab = "Основная";
-      modelHashConsumed = true;
+        if (model && hasAccess(model)) {
+          state.activeModelId = model.id;
+          state.view = "detail";
+          state.activeTab = tab || "Основная";
+        }
+      } else if (["dashboard", "all", "stats", "access"].includes(view)) {
+        state.view = view;
+        state.activeModelId = "";
+      } else if (force && !location.hash) {
+        state.view = "dashboard";
+        state.activeModelId = "";
+      }
+      initialRouteConsumed = true;
+    }
+
+    function routeUrl(params = {}) {
+      const url = new URL(location.href);
+      const search = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value) search.set(key, value);
+      });
+      url.hash = search.toString();
+      return url.toString();
+    }
+
+    function syncRoute(replace = true) {
+      if (!currentUser()) return;
+      let nextUrl = "";
+      if (state.view === "detail" && currentModel()) {
+        nextUrl = routeUrl({ model: state.activeModelId, tab: state.activeTab && state.activeTab !== "Основная" ? state.activeTab : "" });
+      } else {
+        nextUrl = routeUrl({ view: state.view === "dashboard" ? "" : state.view });
+      }
+      if (nextUrl === location.href) return;
+      history[replace ? "replaceState" : "pushState"]({}, "", nextUrl);
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+      const input = document.createElement("textarea");
+      input.value = text;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      return Promise.resolve();
     }
 
     function renderShell() {
@@ -1361,6 +1409,7 @@
         state.view = btn.dataset.view;
         state.activeModelId = "";
         persist();
+        syncRoute(false);
         render();
       });
       const latest = document.getElementById("loadLatestRemote");
@@ -1601,6 +1650,7 @@
         state.view = "detail";
         state.activeTab = "Основная";
         persist();
+        syncRoute(false);
         render();
       });
       document.querySelectorAll("[data-filter]").forEach(btn => btn.onclick = () => {
@@ -1642,6 +1692,7 @@
               <p class="muted">${escapeHtml(m.article || "без артикула")}</p>
             </div>
             <div class="actions">
+              <button id="copyModelLink">Скопировать ссылку</button>
               ${canEditPrimary() ? `<button class="primary" id="saveModelChanges" ${unsavedModelIds.has(m.id) ? "" : "disabled"}>Сохранить изменения</button>` : ""}
               ${canEditPrimary() ? `<span class="save-state ${unsavedModelIds.has(m.id) ? "dirty" : ""}" id="saveState">${unsavedModelIds.has(m.id) ? "Есть несохраненные изменения" : "Все изменения сохранены"}</span>` : ""}
               ${actionButtons(m)}
@@ -2094,8 +2145,16 @@
     }
 
     function bindDetail() {
-      document.getElementById("backHome").onclick = () => { state.view = "dashboard"; state.activeModelId = ""; persist(); render(); };
-      document.querySelectorAll("[data-tab]").forEach(btn => btn.onclick = () => { state.activeTab = btn.dataset.tab; persist(); render(); });
+      document.getElementById("backHome").onclick = () => { state.view = "dashboard"; state.activeModelId = ""; persist(); syncRoute(false); render(); };
+      const copyLink = document.getElementById("copyModelLink");
+      if (copyLink) copyLink.onclick = () => {
+        const url = routeUrl({ model: state.activeModelId, tab: state.activeTab && state.activeTab !== "Основная" ? state.activeTab : "" });
+        copyText(url).then(() => {
+          copyLink.textContent = "Ссылка скопирована";
+          setTimeout(() => { copyLink.textContent = "Скопировать ссылку"; }, 1400);
+        }).catch(() => alert("Не удалось скопировать ссылку"));
+      };
+      document.querySelectorAll("[data-tab]").forEach(btn => btn.onclick = () => { state.activeTab = btn.dataset.tab; persist(); syncRoute(false); render(); });
       document.querySelectorAll("[data-action]").forEach(btn => btn.onclick = () => {
         if (!ensureCurrentModelSaved()) return;
         if (!requireOnlineWrite()) return;
@@ -3087,6 +3146,11 @@
     };
     document.getElementById("passwordInput").onkeydown = e => { if (e.key === "Enter") document.getElementById("loginButton").click(); };
     document.getElementById("logoutButton").onclick = () => { state.currentUserId = ""; state.activeModelId = ""; persist(); render(); };
+    window.addEventListener("hashchange", () => {
+      if (!currentUser()) return;
+      applyInitialModelLink(true);
+      render();
+    });
 
     function modelPhotoThumb(m) {
       if (m.photoDataUrl) return `
