@@ -335,7 +335,7 @@
     .text-block.correction-note { background: #fff7fb; border-color: rgba(180, 88, 145, .28); }
     .text-block.link-note { background: #fff7fb; border-color: rgba(180, 88, 145, .28); }
     .text-block span { color: var(--muted); font-size: 13px; font-weight: 750; }
-    .text-block p { font-size: 15px; overflow-wrap: anywhere; }
+    .text-block p { font-size: 15px; overflow-wrap: anywhere; white-space: pre-wrap; }
     .text-block a { color: #177366; font-weight: 850; overflow-wrap: anywhere; text-decoration-thickness: 2px; text-underline-offset: 3px; }
     .check-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .pay-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 1.2fr; gap: 12px; }
@@ -346,8 +346,8 @@
     .comment-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; font-weight: 700; }
     .table-row { display: grid; grid-template-columns: minmax(260px, 1.4fr) minmax(130px, .75fr) minmax(150px, .8fr) minmax(130px, .75fr) 154px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .table-row.backup-row { grid-template-columns: minmax(150px, .8fr) minmax(220px, 1.4fr) minmax(90px, .5fr) minmax(90px, .5fr) minmax(120px, .6fr) minmax(130px, .7fr); }
-    .table-row.workshop-pay-row { grid-template-columns: minmax(160px, 1fr) minmax(100px, .65fr) minmax(90px, .55fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(140px, .75fr) 154px; }
-    .table-row.workshop-pay-row.limited { grid-template-columns: minmax(180px, 1.1fr) minmax(100px, .7fr) minmax(90px, .6fr) minmax(170px, 1fr) minmax(150px, .8fr) 154px; }
+    .table-row.workshop-pay-row { grid-template-columns: minmax(150px, .9fr) minmax(95px, .55fr) minmax(85px, .45fr) minmax(105px, .55fr) minmax(105px, .55fr) minmax(135px, .75fr) minmax(135px, .7fr) 142px; }
+    .table-row.workshop-pay-row.limited { grid-template-columns: minmax(160px, 1fr) minmax(95px, .6fr) minmax(90px, .5fr) minmax(105px, .55fr) minmax(170px, 1fr) minmax(140px, .75fr) 142px; }
     .table-row-action { min-height: 40px; display: flex; justify-content: flex-end; align-items: center; }
     .table-row-action button { width: 100%; }
     .history-row { display: grid; grid-template-columns: 150px 1fr 160px; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
@@ -693,6 +693,7 @@
         material: "",
         hardware: "",
         fabricMeterPrice: 0,
+        liningMeterPrice: 0,
         description: "",
         important: "",
         gradingComment: "",
@@ -733,7 +734,7 @@
       return {
         id: uid(), number, status: `Отшив образца ${number}`, sentAt: "", acceptedAt: "",
         deadline: "", readyAt: "", ownerComment: "", workshopComment: "", usedHardware: "",
-        fabricUsage: 0, cost: 0, paid: false, paidAt: "", ...overrides
+        fabricUsage: 0, liningUsage: 0, cost: 0, paid: false, paidAt: "", ...overrides
       };
     }
 
@@ -771,6 +772,8 @@
         model.brand = model.brand || "Не определились";
         model.photoDataUrl = model.photoDataUrl || "";
         model.fabricMeterPrice = Number(model.fabricMeterPrice || 0);
+        model.liningMeterPrice = Number(model.liningMeterPrice || 0);
+        (model.samples || []).forEach(s => s.liningUsage = Number(s.liningUsage || 0));
         (model.samples || []).forEach(s => s.usedHardware = s.usedHardware || "");
         (model.corrections || []).forEach(c => {
           c.printCost = Number(c.paperCost ?? c.printCost ?? 0);
@@ -1382,7 +1385,9 @@
     }
 
     function fabricCostForSample(model, sampleItem) {
-      return Number(sampleItem.fabricUsage || 0) * Number(model.fabricMeterPrice || 0);
+      const mainFabricCost = Number(sampleItem.fabricUsage || 0) * Number(model.fabricMeterPrice || 0);
+      const liningCost = Number(sampleItem.liningUsage || 0) * Number(model.liningMeterPrice || 0);
+      return mainFabricCost + liningCost;
     }
 
     function fabricCostTotal(model) {
@@ -1936,6 +1941,8 @@
           ${statusMiniBlock(s.status)}
           ${textMiniBlock(`Комментарий для цеха к образцу ${s.number}`, s.ownerComment, "owner-note")}
           ${s.readyAt ? textMiniBlock(`Комментарий цеха после отшива ${s.number} образца`, s.workshopComment, "workshop-note") : ""}
+          ${s.readyAt ? textMiniBlock("Расход ткани", `${s.fabricUsage || 0} м`, "workshop-note") : ""}
+          ${s.readyAt ? textMiniBlock("Расход второй ткани/подклада", `${s.liningUsage || 0} м`, "workshop-note") : ""}
           ${s.readyAt ? textMiniBlock("Использованная фурнитура", s.usedHardware, "workshop-note") : ""}
         </section>
       `;
@@ -2066,6 +2073,7 @@
           ${canPay() ? `
             <div class="grid">
               ${field("fabricMeterPrice", "Стоимость 1 метра ткани", m.fabricMeterPrice, "number")}
+              ${field("liningMeterPrice", "Стоимость второй ткани/подклада", m.liningMeterPrice, "number")}
             </div>
           ` : ""}
           ${ready.map((s, index) => samplePayRow(s, index)).join("") || `<div class="empty">Оплат по образцам пока нет</div>`}
@@ -2088,6 +2096,7 @@
       const readySamples = m.samples.filter(s => s.readyAt);
       const workshopTotal = readySamples.reduce((s, p) => s + Number(p.cost || 0), 0);
       const fabric = readySamples.reduce((s, p) => s + Number(p.fabricUsage || 0), 0);
+      const lining = readySamples.reduce((s, p) => s + Number(p.liningUsage || 0), 0);
       const fabricTotal = fabricCostTotal(m);
       const total = constructorTotal + workshopTotal + fabricTotal;
       const days = Math.max(1, Math.ceil((new Date(today()) - new Date(m.createdAt)) / 86400000) + 1);
@@ -2098,7 +2107,7 @@
             ${stat(readySamples.length, "образцов отшито")}
             ${stat(money(constructorTotal), "конструктору")}
             ${stat(money(workshopTotal), "цеху")}
-            ${stat(money(fabricTotal), `ткань · ${fabric.toFixed(2)} м`)}
+            ${stat(money(fabricTotal), `ткань · ${fabric.toFixed(2)} м + подклад · ${lining.toFixed(2)} м`)}
             ${stat(money(total), "общая сумма за всё", "total")}
             ${stat(days, "дней от создания")}
           </div>
@@ -2982,10 +2991,11 @@
         "sample-ready": () => formModal(`Образец ${n} готов`, [
           { id: "comment", label: "Комментарий цеха", type: "textarea", required: true },
           { id: "fabric", label: "Расход ткани", type: "number", required: true },
+          { id: "lining", label: "Расход второй ткани/подклада", type: "number", required: false },
           { id: "hardware", label: "Использованная фурнитура", type: "textarea", required: true },
           { id: "cost", label: "Стоимость за образец", type: "number", required: true }
         ], data => {
-          const s = currentSample(m); s.status = `Образец ${s.number} готов`; s.readyAt = today(); s.workshopComment = data.comment; s.fabricUsage = Number(data.fabric); s.usedHardware = data.hardware; s.cost = Number(data.cost);
+          const s = currentSample(m); s.status = `Образец ${s.number} готов`; s.readyAt = today(); s.workshopComment = data.comment; s.fabricUsage = Number(data.fabric); s.liningUsage = Number(data.lining || 0); s.usedHardware = data.hardware; s.cost = Number(data.cost);
           changeStatus(m, s.status, `Образец ${s.number} готов`); m.currentResponsibleUserId = m.ownerUserId; m.deadline = ""; notifyMovement(m, `Образец ${s.number} готов, требуется действие владельца`, [m.ownerUserId]); saveAndRender();
         }),
         "create-correction": () => formModal(`Подать корректировки ${m.corrections.length + 1}`, [
@@ -3439,10 +3449,10 @@
     function samplePayRow(s, index) {
       const fabricCost = fabricCostForSample(currentModel(), s);
       const showFabricCost = canPay();
-      return `<div class="table-row workshop-pay-row ${showFabricCost ? "" : "limited"}"><strong>Образец ${s.number}</strong><span>${money(s.cost)}</span><span>${s.fabricUsage || 0} м</span>${showFabricCost ? `<span>${money(fabricCost)}</span>` : ""}<span>${escapeHtml(s.usedHardware || "-")}</span><span>${s.paid ? "Оплачено " + s.paidAt : "Не оплачено"}</span><span class="table-row-action">${canPay() && !s.paid ? `<button data-pay="workshop:${index}">Оплачено</button>` : ""}</span></div>`;
+      return `<div class="table-row workshop-pay-row ${showFabricCost ? "" : "limited"}"><strong>Образец ${s.number}</strong><span>${money(s.cost)}</span><span>${s.fabricUsage || 0} м</span><span>${s.liningUsage || 0} м</span>${showFabricCost ? `<span>${money(fabricCost)}</span>` : ""}<span>${escapeHtml(s.usedHardware || "-")}</span><span>${s.paid ? "Оплачено " + s.paidAt : "Не оплачено"}</span><span class="table-row-action">${canPay() && !s.paid ? `<button data-pay="workshop:${index}">Оплачено</button>` : ""}</span></div>`;
     }
     function stat(value, label, cls = "") { return `<div class="stat ${cls}"><strong>${escapeHtml(String(value))}</strong><span class="muted">${label}</span></div>`; }
-    function labelFor(key) { return ({ brand: "Бренд", title: "Название", article: "Артикул", sizeRange: "Размерный ряд", material: "Материал", hardware: "Фурнитура", fabricMeterPrice: "Стоимость 1 метра ткани", description: "Описание", important: "Важные детали", gradingComment: "Комментарий по градации", constructorUserId: "Конструктор", workshopUserId: "Цех" })[key] || key; }
+    function labelFor(key) { return ({ brand: "Бренд", title: "Название", article: "Артикул", sizeRange: "Размерный ряд", material: "Материал", hardware: "Фурнитура", fabricMeterPrice: "Стоимость 1 метра ткани", liningMeterPrice: "Стоимость второй ткани/подклада", description: "Описание", important: "Важные детали", gradingComment: "Комментарий по градации", constructorUserId: "Конструктор", workshopUserId: "Цех" })[key] || key; }
     function escapeHtml(v) { return String(v).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[ch])); }
     function escapeAttr(v) { return escapeHtml(v).replace(/`/g, "&#096;"); }
 
