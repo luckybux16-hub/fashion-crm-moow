@@ -635,6 +635,7 @@
     let saveStatus = "idle";
     let saveStatusText = "";
     let searchRenderTimer = null;
+    let loginNotice = "";
     const unsavedModelIds = new Set();
     const cloudBackupIntervalMs = 120000;
     const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
@@ -853,6 +854,15 @@
       el.textContent = saveStatusLabel();
     }
 
+    function forceLogoutForDatabase(reason = "CRM не подключена к онлайн-базе. Вход временно закрыт.") {
+      loginNotice = reason;
+      state.currentUserId = "";
+      state.activeModelId = "";
+      state.view = "dashboard";
+      localStorage.setItem(storeKey, JSON.stringify(state));
+      render();
+    }
+
     function addSystemEvent(level, title, detail = "") {
       state.systemEvents = state.systemEvents || [];
       state.systemEvents.unshift({
@@ -899,7 +909,7 @@
         setSaveStatus("error", remoteError);
         addSystemEvent("error", "Supabase недоступен при загрузке", error.message || remoteError);
         console.warn("Supabase sync failed", error);
-        render();
+        forceLogoutForDatabase(`CRM не подключена к онлайн-базе (${remoteError}). Вход временно закрыт, чтобы данные не потерялись.`);
       }
     }
 
@@ -932,8 +942,7 @@
         remoteError = supabaseErrorLabel(error);
         setSaveStatus("error", remoteError);
         addSystemEvent("error", `Не удалось выполнить: ${actionName}`, error.message || remoteError);
-        alert(`Онлайн-база сейчас недоступна (${remoteError}). Действие не выполнено.`);
-        render();
+        forceLogoutForDatabase(`Связь с онлайн-базой потеряна (${remoteError}). CRM завершила сессию, чтобы данные не потерялись.`);
         return false;
       }
     }
@@ -955,7 +964,7 @@
           setSaveStatus(state.syncConflict ? "conflict" : "error", remoteError);
           addSystemEvent("error", "Фоновое сохранение не прошло", error.message || remoteError);
           console.warn("Supabase save failed", error);
-          render();
+          forceLogoutForDatabase(`Связь с онлайн-базой потеряна (${remoteError}). CRM завершила сессию, чтобы данные не потерялись.`);
         });
       }, 500);
     }
@@ -1537,6 +1546,8 @@
 
     function renderLogin() {
       const quickLogins = document.getElementById("quickLogins");
+      const loginError = document.getElementById("loginError");
+      if (loginError && loginNotice) loginError.textContent = loginNotice;
       if (!quickLogins) return;
       if (hasSupabase()) {
         quickLogins.innerHTML = `
@@ -2456,7 +2467,7 @@
         addSystemEvent("error", "Не удалось сохранить заявку", error.message || "Supabase не принял запись");
         unsavedModelIds.add(m.id);
         updateSaveState(m.id);
-        alert("Не удалось сохранить изменения. Проверьте подключение и попробуйте еще раз.");
+        forceLogoutForDatabase("Изменения не сохранены: связь с онлайн-базой потеряна. CRM завершила сессию, чтобы не было иллюзии работы.");
       }
     }
 
@@ -3055,8 +3066,7 @@
         restoreSharedDataLocally(snapshot);
         state.activeModelId = "";
         state.view = "dashboard";
-        alert("Заявка не создана: онлайн-база не приняла запись. Попробуйте еще раз.");
-        render();
+        forceLogoutForDatabase("Заявка не создана: онлайн-база не приняла запись. CRM завершила сессию, чтобы данные не потерялись.");
       }
     }
 
@@ -3070,11 +3080,7 @@
         remoteError = "Не сохранено в Supabase";
         setSaveStatus("error", remoteError);
         addSystemEvent("error", "Изменение не сохранено", error.message || remoteError);
-        alert("Изменение не сохранено в онлайн-базу. Сейчас загрузится последняя сохраненная версия CRM.");
-        if (hasSupabase()) {
-          await loadLatestRemoteState().catch(loadError => console.warn("Reload after failed save failed", loadError));
-        }
-        render();
+        forceLogoutForDatabase("Изменение не сохранено в онлайн-базу. CRM завершила сессию, чтобы не было иллюзии работы.");
       }
     }
     function getCurrentNumber(m) { return Number((m.status.match(/\d+/) || [m.samples.length || m.corrections.length || 1])[0]); }
@@ -3337,7 +3343,11 @@
     document.getElementById("loginButton").onclick = async () => {
       const login = cleanLogin(document.getElementById("loginInput").value);
       const password = document.getElementById("passwordInput").value.trim();
+      loginNotice = "";
       document.getElementById("loginError").textContent = "";
+      if (hasSupabase() && !remoteReady) {
+        return document.getElementById("loginError").textContent = `CRM не подключена к онлайн-базе${remoteError ? ` (${remoteError})` : ""}. Вход временно закрыт.`;
+      }
       const userByLogin = state.users.find(u => cleanLogin(u.login) === login || cleanEmail(u.email) === login);
       if (!userByLogin) return document.getElementById("loginError").textContent = "Такой логин или email не найден";
       if (!userByLogin.active) return document.getElementById("loginError").textContent = "Этот доступ отключен";
