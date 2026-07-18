@@ -666,6 +666,8 @@
       allResponsibleFilter: "",
       allSearch: "",
       constructorSettlementUserId: "",
+      constructorSettlementSearch: "",
+      constructorSettlementFilter: "open",
       statsPeriod: "month",
       activeModelId: "",
       activeTab: "Основная",
@@ -765,6 +767,8 @@
       data.allResponsibleFilter = data.allResponsibleFilter || "";
       data.allSearch = data.allSearch || "";
       data.constructorSettlementUserId = data.constructorSettlementUserId || "";
+      data.constructorSettlementSearch = data.constructorSettlementSearch || "";
+      data.constructorSettlementFilter = data.constructorSettlementFilter || "open";
       data.cloudBackups = data.cloudBackups || [];
       data.cloudBackupError = data.cloudBackupError || "";
       data.syncConflict = !!data.syncConflict;
@@ -1105,6 +1109,8 @@
         allResponsibleFilter: state.allResponsibleFilter,
         allSearch: state.allSearch,
         constructorSettlementUserId: state.constructorSettlementUserId,
+        constructorSettlementSearch: state.constructorSettlementSearch,
+        constructorSettlementFilter: state.constructorSettlementFilter,
         statsPeriod: state.statsPeriod,
         activeModelId: state.activeModelId,
         activeTab: state.activeTab,
@@ -1738,7 +1744,7 @@
       const paid = rows.filter(row => row.paid).reduce((sum, row) => sum + row.amount, 0);
       const due = total - paid;
       const released = state.models.filter(m => m.constructorUserId === activeConstructor.id && m.status === "Завершено").length;
-      const modelIds = [...new Set(rows.map(row => row.model.id))];
+      const visibleModels = constructorSettlementModelData(activeConstructor.id);
       return `
         <section class="panel">
           <div class="toolbar">
@@ -1754,9 +1760,15 @@
             ${stat(released, "выпущено моделей")}
           </div>
           <div class="tabs">${constructors.map(user => `<button class="tab ${user.id === activeConstructor.id ? "active" : ""}" data-constructor-settlement="${user.id}">${escapeHtml(user.name)}</button>`).join("")}</div>
+          <div class="filters">
+            <input id="settlementSearch" type="search" value="${escapeAttr(state.constructorSettlementSearch || "")}" placeholder="Поиск по модели или артикулу">
+            <button class="${state.constructorSettlementFilter === "open" ? "dark" : ""}" data-settlement-filter="open">К оплате</button>
+            <button class="${state.constructorSettlementFilter === "archive" ? "dark" : ""}" data-settlement-filter="archive">Архив</button>
+            <button class="${state.constructorSettlementFilter === "all" ? "dark" : ""}" data-settlement-filter="all">Все</button>
+          </div>
         </section>
         <section class="panel">
-          <h3>${escapeHtml(activeConstructor.name)} · ${modelIds.length} моделей</h3>
+          <h3>${escapeHtml(activeConstructor.name)} · ${visibleModels.length} моделей</h3>
           ${constructorSettlementModels(activeConstructor.id)}
         </section>
       `;
@@ -1779,15 +1791,36 @@
       return rows;
     }
 
+    function constructorSettlementModelData(constructorId) {
+      const allRows = constructorSettlementRows(constructorId);
+      const query = String(state.constructorSettlementSearch || "").trim().toLowerCase();
+      return state.models
+        .filter(m => m.constructorUserId === constructorId && !isDeleted(m))
+        .map(model => {
+          const rows = allRows.filter(row => row.model.id === model.id);
+          const total = rows.reduce((sum, row) => sum + row.amount, 0);
+          const paid = rows.filter(row => row.paid).reduce((sum, row) => sum + row.amount, 0);
+          const due = total - paid;
+          return { model, rows, total, paid, due };
+        })
+        .filter(item => item.rows.length)
+        .filter(item => {
+          if (!query) return true;
+          return `${item.model.title || ""} ${item.model.article || ""}`.toLowerCase().includes(query);
+        })
+        .filter(item => {
+          if (state.constructorSettlementFilter === "archive") return item.due <= 0;
+          if (state.constructorSettlementFilter === "all") return true;
+          return item.due > 0;
+        });
+    }
+
     function constructorSettlementModels(constructorId) {
-      const models = state.models.filter(m => m.constructorUserId === constructorId && !isDeleted(m) && constructorSettlementRows(constructorId).some(row => row.model.id === m.id));
-      if (!models.length) return `<div class="empty">Начислений по этому конструктору пока нет</div>`;
-      return models.map(model => {
-        const rows = constructorSettlementRows(constructorId).filter(row => row.model.id === model.id);
-        const total = rows.reduce((sum, row) => sum + row.amount, 0);
-        const paid = rows.filter(row => row.paid).reduce((sum, row) => sum + row.amount, 0);
+      const items = constructorSettlementModelData(constructorId);
+      if (!items.length) return `<div class="empty">По выбранному фильтру моделей нет</div>`;
+      return items.map(({ model, rows, total, paid, due }) => {
         const correctionsCount = (model.corrections || []).length;
-        const payState = paid >= total ? "settlement-paid" : paid > 0 ? "settlement-partial" : "settlement-unpaid";
+        const payState = due <= 0 ? "settlement-paid" : paid > 0 ? "settlement-partial" : "settlement-unpaid";
         return `
           <div class="section ${payState}">
             <div class="toolbar">
@@ -1798,7 +1831,7 @@
               <div class="row">
                 <span class="pill">Всего: ${money(total)}</span>
                 <span class="pill ok">Оплачено: ${money(paid)}</span>
-                <span class="pill ${total - paid > 0 ? "warn" : "ok"}">Должны: ${money(total - paid)}</span>
+                <span class="pill ${due > 0 ? "warn" : "ok"}">Должны: ${money(due)}</span>
               </div>
             </div>
             <div class="row">
@@ -1928,6 +1961,18 @@
         persist();
         render();
       });
+      document.querySelectorAll("[data-settlement-filter]").forEach(btn => btn.onclick = () => {
+        state.constructorSettlementFilter = btn.dataset.settlementFilter;
+        persist();
+        render();
+      });
+      const settlementSearch = document.getElementById("settlementSearch");
+      if (settlementSearch) settlementSearch.oninput = () => {
+        state.constructorSettlementSearch = settlementSearch.value;
+        localStorage.setItem(storeKey, JSON.stringify(state));
+        clearTimeout(searchRenderTimer);
+        searchRenderTimer = setTimeout(() => render(), 180);
+      };
       document.querySelectorAll("[data-settlement-pay]").forEach(btn => btn.onclick = async () => {
         if (!await ensureOnlineWrite("оплата конструктора")) return;
         payConstructorSettlement(btn.dataset.settlementPay);
