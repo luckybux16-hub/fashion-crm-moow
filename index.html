@@ -288,6 +288,9 @@
     }
     .save-state.dirty { background: #fff8e7; border-color: rgba(184,117,18,.28); color: #8a5c10; }
     .section { display: grid; gap: 14px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: var(--shadow); }
+    .section.settlement-paid { background: #f1fbf4; border-color: rgba(45, 133, 80, .28); }
+    .section.settlement-partial { background: #fff9eb; border-color: rgba(184, 117, 18, .32); }
+    .section.settlement-unpaid { background: #fff2f1; border-color: rgba(183, 71, 66, .28); }
     .subsection { display: grid; gap: 12px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
     .primary-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: stretch; }
     .primary-fields { display: grid; gap: 12px; }
@@ -662,6 +665,7 @@
       allFilter: "process",
       allResponsibleFilter: "",
       allSearch: "",
+      constructorSettlementUserId: "",
       statsPeriod: "month",
       activeModelId: "",
       activeTab: "Основная",
@@ -760,6 +764,7 @@
       data.statsPeriod = data.statsPeriod || "month";
       data.allResponsibleFilter = data.allResponsibleFilter || "";
       data.allSearch = data.allSearch || "";
+      data.constructorSettlementUserId = data.constructorSettlementUserId || "";
       data.cloudBackups = data.cloudBackups || [];
       data.cloudBackupError = data.cloudBackupError || "";
       data.syncConflict = !!data.syncConflict;
@@ -1099,6 +1104,7 @@
         allFilter: state.allFilter,
         allResponsibleFilter: state.allResponsibleFilter,
         allSearch: state.allSearch,
+        constructorSettlementUserId: state.constructorSettlementUserId,
         statsPeriod: state.statsPeriod,
         activeModelId: state.activeModelId,
         activeTab: state.activeTab,
@@ -1309,6 +1315,7 @@
     function canEditPrimary() { return isAdmin() || isOwner(); }
     function canPay() { return isAdmin() || isOwner(); }
     function canViewGlobalStats() { return isAdmin() || isOwner(); }
+    function canViewConstructorSettlements() { return isAdmin() || isOwner(); }
     function money(v) { return Number(v || 0).toLocaleString("ru-RU") + " грн"; }
     function inProcess(m) { return !["Завершено", "Удалено из разработки"].includes(m.status); }
     function isDeleted(m) { return m.status === "Удалено из разработки"; }
@@ -1462,7 +1469,7 @@
           state.view = "detail";
           state.activeTab = tab || "Основная";
         }
-      } else if (["dashboard", "all", "stats", "access"].includes(view)) {
+      } else if (["dashboard", "all", "stats", "access", "constructorSettlements"].includes(view)) {
         state.view = view;
         state.activeModelId = "";
       } else if (force && !location.hash) {
@@ -1514,6 +1521,7 @@
       document.getElementById("appShell").classList.toggle("hidden", !user);
       if (!user) return;
       if (state.view === "stats" && !canViewGlobalStats()) state.view = "dashboard";
+      if (state.view === "constructorSettlements" && !canViewConstructorSettlements()) state.view = "dashboard";
       if (state.view === "access" && !isAdmin()) state.view = "dashboard";
       document.getElementById("sessionName").textContent = user.name;
       document.getElementById("sessionRole").textContent = user.role;
@@ -1524,6 +1532,7 @@
         ${state.syncConflict ? `<button class="danger" id="loadLatestRemote">Загрузить новую версию</button>` : ""}
         <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
         <button class="nav-btn ${state.view === "all" ? "active" : ""}" data-view="all">Все модели</button>
+        ${canViewConstructorSettlements() ? `<button class="nav-btn ${state.view === "constructorSettlements" ? "active" : ""}" data-view="constructorSettlements">Расчеты с конструкторами</button>` : ""}
         ${canViewGlobalStats() ? `<button class="nav-btn ${state.view === "stats" ? "active" : ""}" data-view="stats">Статистика</button>` : ""}
         ${isAdmin() ? `<button class="nav-btn ${state.view === "access" ? "active" : ""}" data-view="access">Доступы</button>` : ""}
       `;
@@ -1566,7 +1575,7 @@
 
     function renderHome() {
       const app = document.getElementById("app");
-      app.innerHTML = `<div class="workspace">${state.view === "access" ? accessView() : state.view === "stats" ? globalStatsView() : state.view === "all" ? allView() : dashboardView()}</div>`;
+      app.innerHTML = `<div class="workspace">${state.view === "access" ? accessView() : state.view === "constructorSettlements" ? constructorSettlementsView() : state.view === "stats" ? globalStatsView() : state.view === "all" ? allView() : dashboardView()}</div>`;
       bindHome();
     }
 
@@ -1716,6 +1725,116 @@
       `;
     }
 
+    function constructorSettlementsView() {
+      if (!canViewConstructorSettlements()) return `<section class="panel"><div class="empty">Нет доступа</div></section>`;
+      const constructors = state.users.filter(u => isConstructorRole(u.role) && u.active);
+      if (!constructors.length) return `<section class="panel"><div class="empty">Конструкторы пока не созданы</div></section>`;
+      if (!state.constructorSettlementUserId || !constructors.find(u => u.id === state.constructorSettlementUserId)) {
+        state.constructorSettlementUserId = constructors[0].id;
+      }
+      const activeConstructor = constructors.find(u => u.id === state.constructorSettlementUserId) || constructors[0];
+      const rows = constructorSettlementRows(activeConstructor.id);
+      const total = rows.reduce((sum, row) => sum + row.amount, 0);
+      const paid = rows.filter(row => row.paid).reduce((sum, row) => sum + row.amount, 0);
+      const due = total - paid;
+      const released = state.models.filter(m => m.constructorUserId === activeConstructor.id && m.status === "Завершено").length;
+      const modelIds = [...new Set(rows.map(row => row.model.id))];
+      return `
+        <section class="panel">
+          <div class="toolbar">
+            <div>
+              <h2>Расчеты с конструкторами</h2>
+              <p class="muted">Детализация начислений по лекалам, бумаге и градации. Доступно только владельцу и админу.</p>
+            </div>
+          </div>
+          <div class="stat-grid">
+            ${stat(money(total), "общая оплата конструктору за все время")}
+            ${stat(money(paid), "оплачено")}
+            ${stat(money(due), "должны", "total")}
+            ${stat(released, "выпущено моделей")}
+          </div>
+          <div class="tabs">${constructors.map(user => `<button class="tab ${user.id === activeConstructor.id ? "active" : ""}" data-constructor-settlement="${user.id}">${escapeHtml(user.name)}</button>`).join("")}</div>
+        </section>
+        <section class="panel">
+          <h3>${escapeHtml(activeConstructor.name)} · ${modelIds.length} моделей</h3>
+          ${constructorSettlementModels(activeConstructor.id)}
+        </section>
+      `;
+    }
+
+    function constructorSettlementRows(constructorId) {
+      const rows = [];
+      state.models.filter(m => m.constructorUserId === constructorId && !isDeleted(m)).forEach(model => {
+        (model.payments?.constructor || []).forEach((payment, index) => {
+          const amount = Number(payment.amount || 0);
+          if (!amount) return;
+          rows.push({ model, type: "constructor", index, label: payment.work, amount, paid: !!payment.paid, paidAt: payment.paidAt || "" });
+        });
+        (model.corrections || []).forEach((correctionItem, correctionIndex) => {
+          const amount = Number(correctionItem.paperCost ?? correctionItem.printCost ?? 0);
+          if (!amount) return;
+          rows.push({ model, type: "paper", index: correctionIndex, label: `Бумага · корректировки ${correctionItem.number}`, amount, paid: !!correctionItem.paperPaid, paidAt: correctionItem.paperPaidAt || "" });
+        });
+      });
+      return rows;
+    }
+
+    function constructorSettlementModels(constructorId) {
+      const models = state.models.filter(m => m.constructorUserId === constructorId && !isDeleted(m) && constructorSettlementRows(constructorId).some(row => row.model.id === m.id));
+      if (!models.length) return `<div class="empty">Начислений по этому конструктору пока нет</div>`;
+      return models.map(model => {
+        const rows = constructorSettlementRows(constructorId).filter(row => row.model.id === model.id);
+        const total = rows.reduce((sum, row) => sum + row.amount, 0);
+        const paid = rows.filter(row => row.paid).reduce((sum, row) => sum + row.amount, 0);
+        const correctionsCount = (model.corrections || []).length;
+        const payState = paid >= total ? "settlement-paid" : paid > 0 ? "settlement-partial" : "settlement-unpaid";
+        return `
+          <div class="section ${payState}">
+            <div class="toolbar">
+              <div>
+                <h3>${escapeHtml(modelLine(model))}</h3>
+                <p class="muted">${escapeHtml(model.status)} · корректировок: ${correctionsCount}</p>
+              </div>
+              <div class="row">
+                <span class="pill">Всего: ${money(total)}</span>
+                <span class="pill ok">Оплачено: ${money(paid)}</span>
+                <span class="pill ${total - paid > 0 ? "warn" : "ok"}">Должны: ${money(total - paid)}</span>
+              </div>
+            </div>
+            <div class="row">
+              ${constructorSettlementSummaryPills(model)}
+            </div>
+            ${rows.map(row => constructorSettlementPayRow(row)).join("")}
+          </div>
+        `;
+      }).join("");
+    }
+
+    function constructorSettlementSummaryPills(model) {
+      const pattern = model.payments?.constructor?.[0];
+      const patternAmount = Number(pattern?.amount || 0);
+      const paperRows = (model.corrections || []).filter(c => Number(c.paperCost ?? c.printCost ?? 0) > 0);
+      const paperTotal = paperRows.reduce((sum, c) => sum + Number(c.paperCost ?? c.printCost ?? 0), 0);
+      const paperPaid = paperRows.filter(c => c.paperPaid).reduce((sum, c) => sum + Number(c.paperCost ?? c.printCost ?? 0), 0);
+      return [
+        `<span class="pill ${pattern?.paid ? "ok" : patternAmount ? "warn" : ""}">Лекала: ${money(patternAmount)} · ${pattern?.paid ? "оплачено" : "не оплачено"}</span>`,
+        `<span class="pill ${paperTotal && paperPaid >= paperTotal ? "ok" : paperPaid ? "warn" : paperTotal ? "danger" : ""}">Бумага: ${money(paperTotal)} · оплачено ${money(paperPaid)}</span>`,
+        `<span class="pill">Корректировки: ${(model.corrections || []).length}</span>`
+      ].join("");
+    }
+
+    function constructorSettlementPayRow(row) {
+      return `
+        <div class="table-row">
+          <strong>${escapeHtml(row.label)}</strong>
+          <span>${money(row.amount)}</span>
+          <span>${row.paid ? "Оплачено" : "Не оплачено"}</span>
+          <span>${row.paidAt || "-"}</span>
+          <span class="table-row-action">${canPay() && !row.paid ? `<button data-settlement-pay="${escapeAttr(row.model.id)}:${row.type}:${row.index}">Оплатить</button>` : ""}</span>
+        </div>
+      `;
+    }
+
     function modelsForStatsPeriod(includeDeleted = false) {
       const visible = includeDeleted ? state.models : state.models.filter(m => !isDeleted(m));
       if (state.statsPeriod === "all") return visible;
@@ -1804,6 +1923,15 @@
       });
       const newBtn = document.getElementById("newModel");
       if (newBtn) newBtn.onclick = createModel;
+      document.querySelectorAll("[data-constructor-settlement]").forEach(btn => btn.onclick = () => {
+        state.constructorSettlementUserId = btn.dataset.constructorSettlement;
+        persist();
+        render();
+      });
+      document.querySelectorAll("[data-settlement-pay]").forEach(btn => btn.onclick = async () => {
+        if (!await ensureOnlineWrite("оплата конструктора")) return;
+        payConstructorSettlement(btn.dataset.settlementPay);
+      });
       bindAccess();
     }
 
@@ -2420,6 +2548,32 @@
         addHistory(m, `Оплачено: ${type === "constructor" ? item.work : type === "paper" ? "За бумагу по корректировкам " + item.number : "Образец " + item.number}`);
         await saveAndRender();
       });
+    }
+
+    function payConstructorSettlement(payload) {
+      const [modelId, type, rawIndex] = String(payload || "").split(":");
+      const model = state.models.find(m => m.id === modelId);
+      if (!model) return alert("Модель не найдена");
+      const index = Number(rawIndex);
+      let item = null;
+      let label = "";
+      if (type === "constructor") {
+        item = model.payments?.constructor?.[index];
+        if (!item || item.paid) return;
+        item.paid = true;
+        item.paidAt = today();
+        label = item.work;
+      }
+      if (type === "paper") {
+        item = model.corrections?.[index];
+        if (!item || item.paperPaid) return;
+        item.paperPaid = true;
+        item.paperPaidAt = today();
+        label = `За бумагу по корректировкам ${item.number}`;
+      }
+      if (!item) return;
+      addHistory(model, `Оплачено: ${label}`);
+      saveAndRender();
     }
 
     function markModelUnsaved(model) {
