@@ -641,10 +641,11 @@
     let loginNotice = "";
     const unsavedModelIds = new Set();
     const cloudBackupIntervalMs = 120000;
-    const roles = ["Админ", "Владелец бренда/Дизайнер", "Цех", "Конструктор"];
+    const roles = ["Админ", "Владелец бренда/Дизайнер", "Директор", "Цех", "Конструктор"];
     const users = [
       { id: "u-admin", name: "Админ", login: "admin", email: "admin@fashion-crm.local", password: "admin", role: "Админ", active: true },
       { id: "u-owner", name: "Владелец / дизайнер", login: "owner", email: "owner@fashion-crm.local", password: "owner", role: "Владелец бренда/Дизайнер", active: true },
+      { id: "u-director", name: "Директор", login: "director", email: "director@fashion-crm.local", password: "director", role: "Директор", active: true },
       { id: "u-workshop", name: "Цех", login: "workshop", email: "workshop@fashion-crm.local", password: "workshop", role: "Цех", active: true },
       { id: "u-constructor", name: "Конструктор", login: "constructor", email: "constructor@fashion-crm.local", password: "constructor", role: "Конструктор", active: true }
     ];
@@ -1314,20 +1315,24 @@
     function roleOf(id) { return normalizeRole(state.users.find(u => u.id === id)?.role || ""); }
     function isAdminRole(role) { return normalizeRole(role) === "Админ"; }
     function isOwnerRole(role) { return normalizeRole(role) === "Владелец бренда/Дизайнер"; }
+    function isDirectorRole(role) { return normalizeRole(role) === "Директор"; }
     function isConstructorRole(role) { return normalizeRole(role) === "Конструктор"; }
     function isWorkshopRole(role) { return normalizeRole(role) === "Цех"; }
     function isAdmin() { return isAdminRole(currentUser()?.role); }
     function isOwner() { return isOwnerRole(currentUser()?.role); }
-    function canEditPrimary() { return isAdmin() || isOwner(); }
-    function canPay() { return isAdmin() || isOwner(); }
-    function canViewGlobalStats() { return isAdmin() || isOwner(); }
+    function isDirector() { return isDirectorRole(currentUser()?.role); }
+    function hasOwnerRights() { return isAdmin() || isOwner() || isDirector(); }
+    function canEditPrimary() { return hasOwnerRights(); }
+    function canPay() { return hasOwnerRights(); }
+    function canViewConstructorPayments() { return isAdmin() || isOwner(); }
+    function canViewGlobalStats() { return hasOwnerRights(); }
     function canViewConstructorSettlements() { return isAdmin() || isOwner(); }
     function money(v) { return Number(v || 0).toLocaleString("ru-RU") + " грн"; }
     function inProcess(m) { return !["Завершено", "Удалено из разработки"].includes(m.status); }
     function isDeleted(m) { return m.status === "Удалено из разработки"; }
     function hasAccess(m, user = currentUser()) {
       if (!user) return false;
-      if (isAdminRole(user.role) || isOwnerRole(user.role)) return true;
+      if (isAdminRole(user.role) || isOwnerRole(user.role) || isDirectorRole(user.role)) return true;
       if (isDeleted(m)) return false;
       return m.participants.includes(user.id);
     }
@@ -1362,6 +1367,7 @@
       const role = normalizeRole(currentUser()?.role);
       if (isConstructorRole(role)) return ["Основная", "Комментарии", "Оплата конструктора"];
       if (isWorkshopRole(role)) return ["Основная", "Комментарии", "Оплата и расход цеха"];
+      if (isDirectorRole(role)) return baseTabs.filter(tab => tab !== "Оплата конструктора");
       return baseTabs;
     }
     function addHistory(model, action, details = null) {
@@ -1600,7 +1606,7 @@
               <h2>Dashboard</h2>
               <p class="muted">Сверху краткая сводка, ниже модели, где сейчас ожидается ваше действие.</p>
             </div>
-            ${(isOwner() || isAdmin()) ? `<button class="primary" id="newModel">Создать модель</button>` : ""}
+            ${hasOwnerRights() ? `<button class="primary" id="newModel">Создать модель</button>` : ""}
           </div>
           <div class="stat-grid">
             ${stat(mine.length, "на мне сейчас")}
@@ -1657,6 +1663,7 @@
       role = normalizeRole(role);
       if (isAdminRole(role)) return { title: "система под контролем", text: "Сверху видны доступы, резервные копии и состояние базы. Рабочие модели остаются на виду." };
       if (isOwnerRole(role)) return { title: "сегодня держим разработку в ритме", text: "Здесь собраны модели, где нужно принять решение, передать задачу или проверить результат." };
+      if (isDirectorRole(role)) return { title: "вся разработка перед глазами", text: "Здесь видны модели, статусы, исполнители и общая статистика без конструкторских расчетов." };
       if (isConstructorRole(role)) return { title: "ваши лекала и корректировки собраны здесь", text: "CRM показывает только задачи, где сейчас ожидается ваша работа или финальная отметка." };
       if (isWorkshopRole(role)) return { title: "ваши образцы ждут аккуратного финиша", text: "На дашборде видны модели, которые сейчас находятся на отшиве или сдаче образца." };
       return { title: "приятной работы", text: "Все нужные задачи и модели собраны на этом экране." };
@@ -2020,7 +2027,7 @@
     function detailTab(m) {
       if (state.activeTab === "Основная") return mainTab(m);
       if (state.activeTab === "Комментарии") return commentsTab(m);
-      if (state.activeTab === "Оплата конструктора") return constructorPayTab(m);
+      if (state.activeTab === "Оплата конструктора") return canViewConstructorPayments() ? constructorPayTab(m) : mainTab(m);
       if (state.activeTab === "Оплата и расход цеха") return workshopPayTab(m);
       if (state.activeTab === "История") return historyTab(m);
       if (state.activeTab === "Статистика") return statsTab(m);
@@ -2038,7 +2045,7 @@
         <section class="section">
           <div class="toolbar">
             <h3>Исполнители</h3>
-            <span class="muted">${canEditPrimary() ? "Выбираются владельцем или админом" : "Только просмотр"}</span>
+            <span class="muted">${canEditPrimary() ? "Выбираются владельцем, директором или админом" : "Только просмотр"}</span>
           </div>
           <div class="grid">
             ${selectUserField("constructorUserId", "Конструктор", "Конструктор", m.constructorUserId)}
@@ -2454,7 +2461,7 @@
       if (isDeleted(m) || m.status === "Завершено") return "";
       const user = currentUser();
       const isResponsible = m.currentResponsibleUserId === user.id;
-      const ownerAction = isOwner() || isAdmin();
+      const ownerAction = hasOwnerRights();
       const constructorAction = isConstructorRole(user.role) && isResponsible;
       const workshopAction = isWorkshopRole(user.role) && isResponsible;
       const b = [];
@@ -2787,6 +2794,7 @@
       if (!raw) return "Владелец бренда/Дизайнер";
       if (lower.includes("админ") || lower === "admin") return "Админ";
       if (lower.includes("владел") || lower.includes("дизайн") || lower === "owner") return "Владелец бренда/Дизайнер";
+      if (lower.includes("директор") || lower === "director") return "Директор";
       if (lower.includes("конструкт") || lower.includes("конструтор") || lower === "constructor") return "Конструктор";
       if (lower.includes("цех") || lower.includes("шве") || lower.includes("workshop")) return "Цех";
       return roles.includes(raw) ? raw : "Владелец бренда/Дизайнер";
