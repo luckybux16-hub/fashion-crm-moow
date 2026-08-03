@@ -659,6 +659,7 @@
     const nowText = () => new Date().toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
     const formatDateTime = value => value ? new Date(value).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }) : "-";
     const uid = () => Math.random().toString(36).slice(2, 10);
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
     const seed = {
       currentUserId: "",
@@ -812,23 +813,61 @@
       return supabaseConfig.url.startsWith("http") && supabaseConfig.anonKey && !supabaseConfig.anonKey.includes("__");
     }
 
+    function shouldUseSupabaseProxy() {
+      return location.protocol.startsWith("http") && !["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+    }
+
+    function supabaseRequestTargets(path) {
+      const targets = [];
+      if (shouldUseSupabaseProxy()) targets.push({ url: `/api/supabase?path=${encodeURIComponent(path)}`, proxy: true });
+      targets.push({ url: `${supabaseConfig.url.replace(/\/$/, "")}${path}`, proxy: false });
+      return targets;
+    }
+
     async function supabaseRequest(path, options = {}) {
-      const headers = {
-        apikey: supabaseConfig.anonKey,
-        authorization: `Bearer ${supabaseConfig.anonKey}`,
-        "content-type": "application/json",
-        ...(options.headers || {})
-      };
-      const response = await fetch(`${supabaseConfig.url.replace(/\/$/, "")}${path}`, { ...options, headers });
-      if (!response.ok) {
-        const detail = await response.text();
-        const error = new Error(`Supabase ${response.status}: ${detail || response.statusText}`);
-        error.status = response.status;
-        throw error;
+      const attempts = Number(options.attempts || 2);
+      const timeoutMs = Number(options.timeoutMs || 12000);
+      const { attempts: _attempts, timeoutMs: _timeoutMs, ...fetchOptions } = options;
+      let lastError = null;
+      for (const target of supabaseRequestTargets(path)) {
+        const headers = {
+          "content-type": "application/json",
+          ...(target.proxy ? {} : { apikey: supabaseConfig.anonKey, authorization: `Bearer ${supabaseConfig.anonKey}` }),
+          ...(fetchOptions.headers || {})
+        };
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          try {
+            const response = await fetch(target.url, { ...fetchOptions, headers, signal: controller.signal });
+            clearTimeout(timer);
+            if (!response.ok) {
+              const detail = await response.text();
+              const error = new Error(`Supabase ${response.status}: ${detail || response.statusText}`);
+              error.status = response.status;
+              throw error;
+            }
+            if (response.status === 204) return null;
+            const text = await response.text();
+            return text ? JSON.parse(text) : null;
+          } catch (error) {
+            clearTimeout(timer);
+            lastError = error;
+            if (!isRetryableSupabaseError(error) || attempt === attempts) break;
+            await sleep(500 * attempt);
+          }
+        }
+        if (!isRetryableSupabaseError(lastError)) break;
       }
-      if (response.status === 204) return null;
-      const text = await response.text();
-      return text ? JSON.parse(text) : null;
+      throw lastError || new Error("Supabase request failed");
+    }
+
+    function isRetryableSupabaseError(error) {
+      if (!error) return true;
+      if (error.name === "AbortError") return true;
+      if ([408, 429, 500, 502, 503, 504].includes(Number(error.status))) return true;
+      const message = String(error.message || "");
+      return message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("Load failed");
     }
 
     function supabaseErrorLabel(error) {
@@ -933,18 +972,51 @@
       return !hasSupabase() || (remoteReady && remoteLoaded && !remoteSaveInProgress);
     }
 
-    function requireOnlineWrite() {
+    async function recoverOnlineConnection(actionName = "действие", options = {}) {
+      if (!hasSupabase()) return true;
+      const showAlert = options.showAlert !== false;
+      for (let wait = 0; remoteSaveInProgress && wait < 20; wait++) {
+        setSaveStatus("saving", "Дожидаюсь сохранения...");
+        await sleep(250);
+      }
       if (canWriteSharedData()) return true;
-      alert("Онлайн-база еще не готова или временно недоступна. Обновите страницу или попробуйте через несколько секунд. Действие не сохранено локально.");
+      let lastError = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          setSaveStatus("saving", attempt === 1 ? "Подключаю базу..." : `Повтор подключения ${attempt}/3...`);
+          if (options.preserveLocal) {
+            await loadLatestRemoteStatePreservingLocalEdits();
+          } else {
+            await loadLatestRemoteState({ renderAfter: false });
+          }
+          remoteReady = true;
+          remoteLoaded = true;
+          remoteError = "";
+          setSaveStatus("saved");
+          return true;
+        } catch (error) {
+          lastError = error;
+          remoteReady = false;
+          remoteLoaded = false;
+          remoteError = supabaseErrorLabel(error);
+          await sleep(700 * attempt);
+        }
+      }
+      setSaveStatus("error", remoteError || "Supabase недоступен");
+      addSystemEvent("error", `Не удалось подключиться перед действием: ${actionName}`, lastError?.message || remoteError);
+      if (showAlert) alert(`Онлайн-база временно недоступна (${remoteError || "нет связи"}). Действие не выполнено. Проверьте интернет и нажмите кнопку еще раз через несколько секунд.`);
       return false;
     }
 
     async function ensureOnlineWrite(actionName = "действие") {
-      if (!requireOnlineWrite()) return false;
       if (!hasSupabase()) return true;
+      if (!await recoverOnlineConnection(actionName)) return false;
       try {
         setSaveStatus("saving", "Проверяю базу...");
         await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=updated_at");
+        remoteReady = true;
+        remoteLoaded = true;
+        remoteError = "";
         setSaveStatus("saved");
         return true;
       } catch (error) {
@@ -952,7 +1024,7 @@
         remoteError = supabaseErrorLabel(error);
         setSaveStatus("error", remoteError);
         addSystemEvent("error", `Не удалось выполнить: ${actionName}`, error.message || remoteError);
-        forceLogoutForDatabase(`Связь с онлайн-базой потеряна (${remoteError}). CRM завершила сессию, чтобы данные не потерялись.`);
+        alert(`Онлайн-база временно недоступна (${remoteError}). Действие не выполнено. Проверьте интернет и попробуйте еще раз.`);
         return false;
       }
     }
@@ -960,7 +1032,7 @@
     async function saveSharedChangesOrThrow() {
       localStorage.setItem(storeKey, JSON.stringify(state));
       if (hasSupabase()) {
-        if (!remoteReady || !remoteLoaded) throw new Error("Remote database is not ready");
+        if (!await recoverOnlineConnection("сохранение", { showAlert: false })) throw new Error("Remote database is not ready");
         await saveRemoteNow();
       }
     }
@@ -1042,7 +1114,7 @@
       return Array.isArray(rows) ? rows[0] || null : null;
     }
 
-    async function loadLatestRemoteState() {
+    async function loadLatestRemoteState(options = {}) {
       if (!hasSupabase()) return;
       const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data,updated_at");
       if (!Array.isArray(rows) || !rows[0]?.data) return;
@@ -1054,7 +1126,23 @@
       remoteLoaded = true;
       remoteError = "";
       localStorage.setItem(storeKey, JSON.stringify(state));
-      render();
+      if (options.renderAfter !== false) render();
+    }
+
+    async function loadLatestRemoteStatePreservingLocalEdits() {
+      if (!hasSupabase()) return;
+      const rows = await supabaseRequest("/rest/v1/crm_state?id=eq.main&select=data,updated_at");
+      if (!Array.isArray(rows) || !rows[0]?.data) return;
+      backupSharedState(preRemoteBackupKey, "Локальная копия до загрузки Supabase");
+      const remoteState = normalizeStateData({ ...structuredClone(seed), ...rows[0].data });
+      const mergedShared = mergeRemoteDataPreservingModels(pickSharedData(remoteState), sharedState(), [...unsavedModelIds]);
+      state = normalizeStateData({ ...state, ...mergedShared, ...localUiState(), syncConflict: false, conflictNotice: "" });
+      remoteUpdatedAt = rows[0].updated_at || "";
+      remoteBaselineShared = pickSharedData(remoteState);
+      remoteReady = true;
+      remoteLoaded = true;
+      remoteError = "";
+      localStorage.setItem(storeKey, JSON.stringify(state));
     }
 
     async function createCloudBackup(reason, options = {}) {
@@ -1164,6 +1252,22 @@
         users: Array.from(usersById.values()),
         models: Array.from(modelsById.values()).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))),
         loginEvents: Array.from(loginEventsById.values()).sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 200),
+        systemEvents: mergeSystemEvents(remoteData.systemEvents || [], localData.systemEvents || []),
+        telegramReminderLog: mergeUniqueStrings(remoteData.telegramReminderLog || [], localData.telegramReminderLog || []),
+        telegramDigestLog: mergeUniqueStrings(remoteData.telegramDigestLog || [], localData.telegramDigestLog || [])
+      };
+    }
+
+    function mergeRemoteDataPreservingModels(remoteData, localData, preserveModelIds = []) {
+      const preserve = new Set(preserveModelIds.filter(Boolean));
+      const modelsById = new Map((remoteData.models || []).map(model => [model.id, model]));
+      (localData.models || []).forEach(model => {
+        if (preserve.has(model.id) || !modelsById.has(model.id)) modelsById.set(model.id, model);
+      });
+      return {
+        users: mergeUsersForConcurrentSave(remoteData.users || [], localData.users || [], remoteData.users || []),
+        models: Array.from(modelsById.values()).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))),
+        loginEvents: mergeLoginEvents(remoteData.loginEvents || [], localData.loginEvents || []),
         systemEvents: mergeSystemEvents(remoteData.systemEvents || [], localData.systemEvents || []),
         telegramReminderLog: mergeUniqueStrings(remoteData.telegramReminderLog || [], localData.telegramReminderLog || []),
         telegramDigestLog: mergeUniqueStrings(remoteData.telegramDigestLog || [], localData.telegramDigestLog || [])
@@ -2659,6 +2763,19 @@
       try {
         localStorage.setItem(storeKey, JSON.stringify(state));
         if (hasSupabase()) {
+          if (!remoteReady || !remoteLoaded) {
+            setSaveStatus("saving", "Подключаю базу...");
+            const restored = await recoverOnlineConnection("сохранение заявки", { showAlert: false, preserveLocal: true });
+            if (!restored) {
+              setSaveStatus("error", remoteError || "Supabase недоступен");
+              alert(`Онлайн-база временно недоступна (${remoteError || "нет связи"}). Изменения остались на экране, нажмите “Сохранить изменения” еще раз через несколько секунд.`);
+              if (btn) {
+                btn.disabled = false;
+                btn.textContent = "Сохранить изменения";
+              }
+              return;
+            }
+          }
           if (!await ensureOnlineWrite("сохранение заявки")) throw new Error("Remote database is not ready");
           await saveRemoteNow();
         } else {
