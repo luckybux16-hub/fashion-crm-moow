@@ -819,8 +819,8 @@
 
     function supabaseRequestTargets(path) {
       const targets = [];
-      if (shouldUseSupabaseProxy()) targets.push({ url: `/api/supabase?path=${encodeURIComponent(path)}`, proxy: true });
       targets.push({ url: `${supabaseConfig.url.replace(/\/$/, "")}${path}`, proxy: false });
+      if (shouldUseSupabaseProxy()) targets.push({ url: `/api/supabase?path=${encodeURIComponent(path)}`, proxy: true });
       return targets;
     }
 
@@ -1171,7 +1171,7 @@
     async function loadCloudBackups() {
       if (!hasSupabase()) return;
       try {
-        const rows = await supabaseRequest("/rest/v1/crm_backups?select=id,reason,created_at,data&order=created_at.desc&limit=20");
+        const rows = await supabaseRequest("/rest/v1/crm_backups?select=id,reason,created_at&order=created_at.desc&limit=20");
         state.cloudBackups = Array.isArray(rows) ? rows : [];
         state.cloudBackupError = "";
         localStorage.setItem(storeKey, JSON.stringify(state));
@@ -1180,6 +1180,11 @@
         state.cloudBackupError = "Облачные копии пока недоступны. Проверьте, что SQL для crm_backups выполнен в Supabase.";
         console.warn("Cloud backups load failed", error);
       }
+    }
+
+    async function fetchCloudBackup(id) {
+      const rows = await supabaseRequest(`/rest/v1/crm_backups?id=eq.${encodeURIComponent(id)}&select=id,reason,created_at,data&limit=1`);
+      return Array.isArray(rows) ? rows[0] || null : null;
     }
 
     async function pruneCloudBackups() {
@@ -2545,8 +2550,8 @@
             <div class="table-row backup-row">
               <strong>${escapeHtml(formatDateTime(backup.created_at))}</strong>
               <span>${escapeHtml(backup.reason || "Автокопия")}</span>
-              <span>${(backup.data?.models || []).length} моделей</span>
-              <span>${(backup.data?.users || []).length} доступов</span>
+              <span>данные</span>
+              <span>по запросу</span>
               <button data-preview-cloud="${escapeAttr(backup.id)}">Посмотреть</button>
               <button data-restore-cloud="${escapeAttr(backup.id)}">Восстановить</button>
             </div>
@@ -3180,19 +3185,26 @@
           alert("Не удалось создать облачную копию. Проверьте SQL для crm_backups в Supabase.");
         });
       };
-      document.querySelectorAll("[data-restore-cloud]").forEach(btn => btn.onclick = () => restoreCloudBackup(btn.dataset.restoreCloud));
-      document.querySelectorAll("[data-preview-cloud]").forEach(btn => btn.onclick = () => previewCloudBackup(btn.dataset.previewCloud));
+      document.querySelectorAll("[data-restore-cloud]").forEach(btn => btn.onclick = () => restoreCloudBackup(btn.dataset.restoreCloud).catch(error => {
+        console.warn(error);
+        alert("Не удалось загрузить эту облачную копию");
+      }));
+      document.querySelectorAll("[data-preview-cloud]").forEach(btn => btn.onclick = () => previewCloudBackup(btn.dataset.previewCloud).catch(error => {
+        console.warn(error);
+        alert("Не удалось загрузить эту облачную копию");
+      }));
     }
 
-    function previewCloudBackup(id) {
-      const backup = (state.cloudBackups || []).find(item => item.id === id);
+    async function previewCloudBackup(id) {
+      const meta = (state.cloudBackups || []).find(item => item.id === id);
+      const backup = await fetchCloudBackup(id);
       if (!backup?.data) return alert("Копия не найдена");
       const models = backup.data.models || [];
       const usersCount = (backup.data.users || []).length;
       const lastModels = models.slice(0, 8).map(m => `- ${modelLine(m)} · ${m.status}`).join("\n");
       alert([
-        `Копия от ${formatDateTime(backup.created_at)}`,
-        backup.reason || "Автокопия",
+        `Копия от ${formatDateTime(backup.created_at || meta?.created_at)}`,
+        backup.reason || meta?.reason || "Автокопия",
         "",
         `Моделей: ${models.length}`,
         `Доступов: ${usersCount}`,
@@ -3201,10 +3213,11 @@
       ].join("\n"));
     }
 
-    function restoreCloudBackup(id) {
-      const backup = (state.cloudBackups || []).find(item => item.id === id);
+    async function restoreCloudBackup(id) {
+      const meta = (state.cloudBackups || []).find(item => item.id === id);
+      if (!confirm(`Восстановить облачную копию от ${formatDateTime(meta?.created_at)} и заменить текущие модели/доступы?`)) return;
+      const backup = await fetchCloudBackup(id);
       if (!backup?.data) return alert("Копия не найдена");
-      if (!confirm(`Восстановить облачную копию от ${formatDateTime(backup.created_at)} и заменить текущие модели/доступы?`)) return;
       if (!applySharedData(backup.data)) return alert("Не удалось прочитать облачную копию");
       remoteReady = true;
       remoteLoaded = true;
