@@ -622,6 +622,7 @@
       url: "__SUPABASE_URL__",
       anonKey: "__SUPABASE_ANON_KEY__"
     };
+    const photoBucket = "crm-model-photos";
     let remoteReady = false;
     let remoteLoaded = false;
     let remoteError = "";
@@ -782,6 +783,7 @@
       data.users = normalizeUsers(data.users || []);
       (data.models || []).forEach(model => {
         model.brand = model.brand || "Не определились";
+        model.photoUrl = model.photoUrl || "";
         model.photoDataUrl = model.photoDataUrl || "";
         model.fabricMeterPrice = Number(model.fabricMeterPrice || 0);
         model.liningMeterPrice = Number(model.liningMeterPrice || 0);
@@ -2516,7 +2518,9 @@
             <div class="actions">
               <button id="refreshCloudBackups">Обновить список</button>
               <button id="makeCloudBackup">Создать облачную копию сейчас</button>
+              <button id="migratePhotosStorage" ${modelsWithEmbeddedPhotos().length ? "" : "disabled"}>Перенести фото в Storage</button>
             </div>
+            <p class="muted">Фото в базе: ${modelsWithEmbeddedPhotos().length}. После переноса база станет легче, а в заявках останутся ссылки на фото.</p>
             ${state.cloudBackupError ? `<div class="empty">${escapeHtml(state.cloudBackupError)}</div>` : cloudBackupsList()}
           </div>
           <div class="mini-block">
@@ -2652,12 +2656,19 @@
       const photoInput = document.getElementById("modelPhotoInput");
       if (photoInput) photoInput.onchange = handleModelPhotoUpload;
       const removePhoto = document.getElementById("removeModelPhoto");
-      if (removePhoto) removePhoto.onclick = () => {
+      if (removePhoto) removePhoto.onclick = async () => {
         const m = currentModel();
+        const oldPhotoUrl = m.photoUrl;
         m.photoDataUrl = "";
+        m.photoUrl = "";
         addHistory(m, "Удалено фото модели");
-        markModelUnsaved(m);
-        render();
+        if (hasSupabase()) {
+          await deletePhotoFromStorage(oldPhotoUrl);
+          await saveAndRender();
+        } else {
+          markModelUnsaved(m);
+          render();
+        }
       };
       bindPhotoOpeners();
     }
@@ -3185,6 +3196,11 @@
           alert("Не удалось создать облачную копию. Проверьте SQL для crm_backups в Supabase.");
         });
       };
+      const migratePhotos = document.getElementById("migratePhotosStorage");
+      if (migratePhotos) migratePhotos.onclick = () => migrateEmbeddedPhotosToStorage().catch(error => {
+        console.warn(error);
+        alert("Не удалось перенести фото. Проверьте SQL для Supabase Storage.");
+      });
       document.querySelectorAll("[data-restore-cloud]").forEach(btn => btn.onclick = () => restoreCloudBackup(btn.dataset.restoreCloud).catch(error => {
         console.warn(error);
         alert("Не удалось загрузить эту облачную копию");
@@ -3193,6 +3209,28 @@
         console.warn(error);
         alert("Не удалось загрузить эту облачную копию");
       }));
+    }
+
+    function modelsWithEmbeddedPhotos() {
+      return (state.models || []).filter(model => model.photoDataUrl && !model.photoUrl);
+    }
+
+    async function migrateEmbeddedPhotosToStorage() {
+      if (!hasSupabase()) return alert("Supabase Storage доступен только в онлайн-режиме");
+      const models = modelsWithEmbeddedPhotos();
+      if (!models.length) return alert("Фото уже перенесены");
+      if (!confirm(`Перенести ${models.length} фото из базы в Supabase Storage? После этого база CRM станет легче.`)) return;
+      setSaveStatus("saving", "Переношу фото...");
+      let migrated = 0;
+      for (const model of models) {
+        const url = await uploadPhotoToStorage(model, model.photoDataUrl, `-${Date.now()}-${migrated}`);
+        model.photoUrl = url;
+        model.photoDataUrl = "";
+        addHistory(model, "Фото перенесено в Supabase Storage");
+        migrated++;
+      }
+      await saveAndRender();
+      alert(`Фото перенесены: ${migrated}`);
     }
 
     async function previewCloudBackup(id) {
@@ -3546,6 +3584,82 @@
       return lastDataUrl;
     }
 
+    function dataUrlToBlob(dataUrl) {
+      const [header, body] = String(dataUrl || "").split(",");
+      const mime = (header.match(/data:([^;]+)/) || [])[1] || "image/jpeg";
+      const bytes = atob(body || "");
+      const array = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) array[i] = bytes.charCodeAt(i);
+      return new Blob([array], { type: mime });
+    }
+
+    function storageObjectPath(model, suffix = "") {
+      const safeId = String(model?.id || uid()).replace(/[^a-zA-Z0-9_-]/g, "");
+      return `models/${safeId}${suffix}.jpg`;
+    }
+
+    function publicStorageUrl(path) {
+      return `${supabaseConfig.url.replace(/\/$/, "")}/storage/v1/object/public/${photoBucket}/${path}`;
+    }
+
+    async function uploadPhotoToStorage(model, dataUrl, suffix = "") {
+      if (!hasSupabase()) throw new Error("Supabase Storage не настроен");
+      const path = storageObjectPath(model, suffix);
+      if (shouldUseSupabaseProxy()) {
+        const response = await fetch("/api/storage", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ path, dataUrl })
+        });
+        if (!response.ok) {
+          const detail = await response.text();
+          throw new Error(`Storage ${response.status}: ${detail || response.statusText}`);
+        }
+        const data = await response.json();
+        if (!data?.url) throw new Error("Storage не вернул ссылку");
+        return data.url;
+      }
+      const blob = dataUrlToBlob(dataUrl);
+      const response = await fetch(`${supabaseConfig.url.replace(/\/$/, "")}/storage/v1/object/${photoBucket}/${path}`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseConfig.anonKey,
+          authorization: `Bearer ${supabaseConfig.anonKey}`,
+          "content-type": blob.type || "image/jpeg",
+          "x-upsert": "true"
+        },
+        body: blob
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Storage ${response.status}: ${detail || response.statusText}`);
+      }
+      return publicStorageUrl(path);
+    }
+
+    async function deletePhotoFromStorage(url) {
+      if (!hasSupabase() || !url || !url.includes(`/storage/v1/object/public/${photoBucket}/`)) return;
+      const path = decodeURIComponent(url.split(`/storage/v1/object/public/${photoBucket}/`)[1] || "");
+      if (!path) return;
+      if (shouldUseSupabaseProxy()) {
+        await fetch("/api/storage", {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ path })
+        }).catch(error => console.warn("Storage delete failed", error));
+        return;
+      }
+      await fetch(`${supabaseConfig.url.replace(/\/$/, "")}/storage/v1/object/${photoBucket}`, {
+        method: "DELETE",
+        headers: {
+          apikey: supabaseConfig.anonKey,
+          authorization: `Bearer ${supabaseConfig.anonKey}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ prefixes: [path] })
+      }).catch(error => console.warn("Storage delete failed", error));
+    }
+
     async function preparePhotoDataUrl(file) {
       const dataUrl = await readFileAsDataUrl(file);
       const originalCanBeSaved = /^image\/(jpeg|jpg|png|webp)$/i.test(file.type || "") && dataUrl.length < 1300000;
@@ -3576,13 +3690,27 @@
           throw new Error("Слишком большое фото");
         }
         const m = currentModel();
-        m.photoDataUrl = compressed;
-        addHistory(m, "Обновлено фото модели");
-        markModelUnsaved(m);
-        render();
+        if (hasSupabase()) {
+          setPhotoUploadHint("Фото загружается в Storage...");
+          const oldPhotoUrl = m.photoUrl;
+          const url = await uploadPhotoToStorage(m, compressed, `-${Date.now()}`);
+          m.photoUrl = url;
+          m.photoDataUrl = "";
+          await deletePhotoFromStorage(oldPhotoUrl);
+          addHistory(m, "Обновлено фото модели");
+          await saveAndRender();
+        } else {
+          m.photoDataUrl = compressed;
+          m.photoUrl = "";
+          addHistory(m, "Обновлено фото модели");
+          markModelUnsaved(m);
+          render();
+        }
       } catch (error) {
         console.warn("Photo upload failed", error);
-        const message = "Не удалось загрузить это фото. На планшете откройте фото, сделайте скриншот и загрузите скриншот.";
+        const message = String(error.message || "").includes("Storage")
+          ? "Не удалось загрузить фото в Supabase Storage. Проверьте, что SQL для bucket crm-model-photos выполнен."
+          : "Не удалось загрузить это фото. На планшете откройте фото, сделайте скриншот и загрузите скриншот.";
         setPhotoUploadHint(message, true);
         alert(message);
       } finally {
@@ -3595,7 +3723,7 @@
         photo.onclick = event => {
           event.stopPropagation();
           const model = state.models.find(m => m.id === photo.dataset.photoOpen);
-          openPhotoModal(model?.photoDataUrl);
+          openPhotoModal(photoSrc(model));
         };
       });
     }
@@ -3700,20 +3828,26 @@
       render();
     });
 
+    function photoSrc(model) {
+      return model?.photoUrl || model?.photoDataUrl || "";
+    }
+
     function modelPhotoThumb(m) {
-      if (m.photoDataUrl) return `
+      const src = photoSrc(m);
+      if (src) return `
         <span class="photo-frame">
-          <img class="model-photo" src="${escapeAttr(m.photoDataUrl)}" alt="Фото модели">
+          <img class="model-photo" src="${escapeAttr(src)}" alt="Фото модели">
           <span class="photo-open-control" data-photo-open="${escapeAttr(m.id)}" title="Открыть фото">+</span>
         </span>
       `;
       return `<div class="model-photo-placeholder">Без фото</div>`;
     }
     function modelPhotoSection(m) {
-      const preview = m.photoDataUrl
+      const src = photoSrc(m);
+      const preview = src
         ? `
           <span class="photo-frame">
-            <img class="photo-preview" src="${escapeAttr(m.photoDataUrl)}" alt="Фото модели">
+            <img class="photo-preview" src="${escapeAttr(src)}" alt="Фото модели">
             <button class="photo-open-control" data-photo-open="${escapeAttr(m.id)}" title="Открыть фото" type="button">+</button>
           </span>
         `
@@ -3724,10 +3858,10 @@
           ${canEditPrimary() ? `
             <div class="actions">
               <label class="file-button">
-                <span>${m.photoDataUrl ? "Заменить фото" : "Загрузить фото"}</span>
+                <span>${src ? "Заменить фото" : "Загрузить фото"}</span>
                 <input id="modelPhotoInput" type="file" accept="image/*,.heic,.heif">
               </label>
-              ${m.photoDataUrl ? `<button id="removeModelPhoto" class="danger">Удалить фото</button>` : ""}
+              ${src ? `<button id="removeModelPhoto" class="danger">Удалить фото</button>` : ""}
             </div>
             <div id="photoUploadHint" class="photo-upload-hint"></div>
           ` : ""}

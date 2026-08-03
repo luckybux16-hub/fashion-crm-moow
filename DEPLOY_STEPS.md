@@ -5,11 +5,13 @@
 1. Create a Supabase project.
 2. Open SQL Editor.
 3. Run `supabase/schema.sql`.
-4. Copy these values from Project Settings -> API:
+4. Run `supabase/storage-schema.sql` to create the public model-photo bucket.
+5. Copy these values from Project Settings -> API:
    - Project URL
    - anon public key
 
 The current schema is intentionally simple for the prototype: one shared JSON document in `crm_state`.
+Model cover photos are stored in Supabase Storage bucket `crm-model-photos`; CRM stores only public URLs in the model data.
 
 ## Step 1.1. CRM-managed access
 
@@ -29,6 +31,7 @@ Add environment variables:
 
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` (server-only, for model photo uploads to Storage)
 - `TELEGRAM_BOT_TOKEN` (optional, for Telegram notifications)
 
 Build command:
